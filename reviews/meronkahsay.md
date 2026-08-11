@@ -1,80 +1,76 @@
-# 📊 Review — Meron Kahsay
+# 🛠️ Engineering Review: Meron Kahsay
 
-| Field | Value |
+| Snapshot | |
 |---|---|
-| **Submission** | `github.com/meronkahsay/db-capacity-engineering-lab` @ `f2e8ae3` |
-| **Reviewed** | `2026-08-11` · rob |
-| **Assessed against** | `ASSIGNMENT.md` rubric + `instructor-guide.md` (incl. deviations) |
-| **Score** | **97 / 100** |
-| **Grade** | `Distinction` |
-| **Verdict** | Complete; caught all 4 deviations with evidence. Reference-quality. |
+| **Target** | `github.com/meronkahsay/db-capacity-engineering-lab` @ `f2e8ae3` |
+| **Reviewer** | rob · `2026-08-11` |
+| **Status** | `✅ Ready to Merge — 97/100, Distinction` |
+| **Superpower Shown** | Disproving the ticket's premise with captured evidence — on all four incidents. |
+| **TL;DR** | Reference-quality work across the whole lab; one sentence of synthesis away from a perfect score. |
 
 ---
 
-## 🎯 Scorecard
+## 🧭 1. System Health *(How this submission measures up)*
 
-| Section | Weight | Score | | 1-line note |
+| Vector | Health | Score | | Mentor's Note |
 |---|--:|--:|---|---|
-| Baseline | 8 | 8 | ▰▰▰▰▰▰▰▰▰▰ | Full k6 (p50–p99), SLOs justified, variance note, Grafana png |
-| OPS-2201 | 20 | 20 | ▰▰▰▰▰▰▰▰▰▰ | Deviation A caught; index+LIMIT, ~84–100× before/after |
-| OPS-2202 | 20 | 20 | ▰▰▰▰▰▰▰▰▰▰ | Little's Law from measured W&λ; Deviation B (event-loop ceiling) |
-| OPS-2203 | 20 | 20 | ▰▰▰▰▰▰▰▰▰▰ | Real lock chain + 1205; 1/W math; A/B-tested residual ceiling |
-| OPS-2204 | 20 | 20 | ▰▰▰▰▰▰▰▰▰▰ | Self-corrected hypothesis; streaming→pagination; trailers bug fixed |
-| Synthesis | 8 | 8 | ▰▰▰▰▰▰▰▰▰▰ | Blast-radius ranking w/ own numbers; one-fix call; per-incident alerts |
-| Scar logs | 4 | 4 | ▰▰▰▰▰▰▰▰▰▰ | All 4 tight, number-first, each names a pre-emptive alert |
-| Raw deduction | — | −3 | | See §3 |
+| Investigation & Evidence | 30 | 29 | ▰▰▰▰▰▰▰▰▰▰ | k6 + `EXPLAIN` + `docker stats` + lock views on all 4; −1 for missing 2202/2203 pngs. |
+| Root-Cause & Capacity Math | 30 | 30 | ▰▰▰▰▰▰▰▰▰▰ | Little's Law, `1/W`, and O(N) memory all derived from *measured* values. |
+| Fix & Verification | 20 | 20 | ▰▰▰▰▰▰▰▰▰▰ | One dedicated fix commit per incident, before/after in every message. |
+| Coverage & Synthesis | 20 | 18 | ▰▰▰▰▰▰▰▰▰▱ | 4/4 + full synthesis; −2: the cross-cutting root lever is only implied. |
 | **Total** | **100** | **97** | | |
 
 ---
 
-## 1. 📋 What was asked  *(did the deliverables land?)*
+## 🎯 2. The Baseline *(Deliverables check)*
 
-| # | Deliverable | Required? | Status | Evidence / where |
-|---|---|:--:|:--:|---|
-| 1 | Baseline captured first, used as comparison | ✅ | ✅ Done | k6 block + SLOs; `evidence/baseline/…png` |
-| 2 | All 4 incidents reproduced (k6 pasted) | ✅ | ✅ Done | Raw summaries inline, 4/4 |
-| 3 | Root cause + mechanism + capacity math ×4 | ✅ | ✅ Done | 4/4, all with numbers |
-| 4 | Fix applied **and re-run**, before/after ×4 | ✅ | ✅ Done | Dedicated commit per incident (`d4071f7`,`6a28f6b`,`922cabb`,`bfe2eb8`) |
-| 5 | `LAB_JOURNAL.md` fully filled incl. synthesis | ✅ | ✅ Done | Complete (`c364021`) |
-| 6 | `SCARS.md` — all four entries | ✅ | ✅ Done | 4/4 |
-| 7 | Committed & pushed to own repo | ✅ | ✅ Done | 8 clean commits |
-| 8 | Grafana screenshots per incident in `evidence/` | ✅ | ⚠️ Partial | Only baseline, 2201, 2204 (no 2202/2203) |
+| Status | Feature / Requirement | Evidence / Location |
+|:--:|---|---|
+| ✅ | Baseline first + SLOs justified | `LAB_JOURNAL.md` §Baseline; `evidence/baseline/*.png` |
+| ✅ | OPS-2201 — index + `LIMIT 50` fix | commit `d4071f7`, `api/server.js` |
+| ✅ | OPS-2202 — pool + payload fix | commit `6a28f6b`, `api/{database,server}.js` |
+| ✅ | OPS-2203 — commit-then-notify + guarded update | commit `922cabb`, `api/server.js` |
+| ✅ | OPS-2204 — streaming + pagination | commit `bfe2eb8`, `api/server.js` |
+| ✅ | Post-incident synthesis | commit `c364021`, `LAB_JOURNAL.md` |
+| ✅ | `SCARS.md` — 4 entries | 4/4, number-first |
+| 🚧 | Grafana screenshots per incident | Only baseline, 2201, 2204 (no 2202/2203) |
 
-> **Legend:** ✅ complete · ⚠️ partial · ❌ missing · ➖ n/a
-
----
-
-## 2. ✅ What you did well  *(evidence, not praise — each line has a number)*
-
-- **Caught Deviation A (2201)** — index alone left p95 at `13.23s`; adding `LIMIT 50` → p95 `132.22ms`, `2407 req/s` (~84–100× / ~105–122×). Spotted `~3GB data_received` was the real cost.
-- **Little's Law, done properly (2202)** — measured `W=1.73ms` × `λ=1620 req/s` → `~2.8` conns needed vs configured `2`; pool of 2 caps at `2/W ≈ 1156 req/s` < arrivals.
-- **Caught Deviation B (2202)** — pool 2→20 alone made it *worse* (CPU `173%`, `0.37%` resets); traced to synchronous `JSON.stringify` on the event loop; `LIMIT 50→10` dropped CPU to `0.83%`.
-- **Real lock evidence (2203)** — `171`-row single-file `data_lock_waits` chain on `id=1`; `Innodb_row_lock_time_avg 4992ms` at the `5s` timeout; `1/W = 2 admits/s`; A/B pool test 20→50 (`1.11→1.06s`) proved the residual `~1s` p95 is an architectural ceiling.
-- **Self-corrected hypothesis (2204)** — `docker inspect OOMKilled:false`; found it was V8's `--max-old-space-size=256` fatal error (heap `253–259MB`), not a kernel kill; `13` restarts → `0`.
-- **Beyond scope (2204)** — spotted streaming fixes memory but not bytes (`4.4GB`/`14.78%` timeouts), added cursor pagination, and fixed a real `res.setHeader`-after-`res.write` bug via HTTP trailers.
+> **Legend:** ✅ Nailed it · 🚧 Needs a tweak · ❌ Missing / Blocked
 
 ---
 
-## 3. ⚠️ What you missed  *(ranked by points lost — every row ends in an action)*
+## 🌟 3. What You Nailed *(Keep doing this)*
 
-| Rank | Gap | Impact | Pts lost | 👉 Do this |
-|:--:|---|---|:--:|---|
-| 1 | Deepest cross-cutting insight only *implied* | Missed lab's headline takeaway | −1 | State it: `connectionLimit:2` is the shared lever behind 2201/2202/2203 — raising it in 2202 is *why* 2203's 1205 appeared |
-| 2 | No Grafana screenshots for 2202 & 2203 | Brief asks for per-incident png | −1 | Drop the two dashboard captures into `evidence/ops-2202/` and `ops-2203/` |
-| 3 | k6 summaries quoted inline, not committed | Slightly less auditable | −1 | Commit raw runs as `evidence/*.txt` alongside the inline quotes |
+*Patterns executed at a senior level — bank these.*
+
+- **"The obvious fix isn't the fix" — four times** — 2201: index alone left p95 `13.23s`; `LIMIT 50` → `132.22ms` @ `2407 req/s`. You followed the `~3GB data_received` to the real cost.
+- **Little's Law from measured inputs** — 2202: `W=1.73ms` × `λ=1620/s` → `~2.8` conns needed vs configured `2`; then caught the *second* ceiling (synchronous `JSON.stringify` on the event loop — CPU `173%` → `0.83%` after payload trim).
+- **Ground-truth over theory** — 2204: hypothesis said kernel OOM-kill; `docker inspect` said `OOMKilled:false`. You corrected to V8's `--max-old-space-size` fatal error (heap `253–259MB`), `13` restarts → `0`.
+- **Fixing beyond the brief** — 2204: saw streaming fixes memory but not bytes (`4.4GB` / `14.78%` timeouts), added cursor pagination, and fixed a real `res.setHeader`-after-`res.write` bug with HTTP trailers.
+- **Auditable delivery** — one clean commit per incident, each with before/after numbers in the message.
 
 ---
 
-## 4. 🧾 Bottom line  *(facts + next moves)*
+## 💡 4. The Refactor Zone *(Where we level up)*
 
-**Facts**
-- `4 of 4` incidents fully worked; `8 of 8` Definition-of-Done items met.
-- All 4 instructor-guide deviations (A, B, 2203-lock, D) independently discovered and proven with numbers.
-- One dedicated, auditable fix commit per incident; before/after in every commit message.
+*Small polish to take this from a 97 to a flawless exemplar.*
 
-**Do next — in order**
-1. Add the one-sentence `connectionLimit` coupling to the synthesis — the perfect capstone.
-2. Backfill 2202/2203 Grafana screenshots + raw k6 `evidence/*.txt`.
-3. Next lab: when the *same* fix recurs across tickets, step back and ask if they share one root lever.
+| 🔴 Priority | The Challenge | System Impact | 🛠️ The Next-Level Pattern |
+|:--:|---|---|---|
+| **Med** | The shared root lever is implied, not stated | Misses the lab's single deepest takeaway | **Fix:** Add one line to the synthesis — `connectionLimit:2` drives 2201/2202/2203, and raising it in 2202 is *why* 2203's `1205` errors surfaced.<br>**Principle:** When one fix keeps recurring across "independent" tickets, name the coupling — that's the systems-thinking payoff. |
+| **Low** | No Grafana pngs for 2202 & 2203 | Brief asks for a capture per incident | **Fix:** Drop the two dashboards into `evidence/ops-2202/` and `ops-2203/`.<br>**Principle:** A screenshot is the fastest proof a reviewer can verify at a glance. |
+| **Low** | k6 summaries quoted inline only | Slightly less auditable than an artifact | **Fix:** Commit raw runs as `evidence/*.txt` beside the inline quotes.<br>**Principle:** Inline for reading, committed file for re-checking — keep both. |
 
-**Grade: 97/100 — Distinction.** Exemplar submission; suitable to share (anonymised) as a model answer for future cohorts.
+---
+
+## 🚀 5. Getting to 'Approved' *(Your Action Plan)*
+
+**Mentor's Note:**
+> This is the strongest submission in the cohort — you didn't just pass each ticket, you disproved its premise with numbers on all four, and the OPS-2204 investigation (self-correcting the OOM theory, then catching the streaming-vs-bandwidth distinction) is senior-SRE work. Nothing here blocks a merge; the items below are pure polish.
+
+**Optional polish, in order:**
+1. **P0:** Add the one-line `connectionLimit` coupling to the synthesis — the perfect capstone.
+2. **P1:** Backfill the 2202/2203 Grafana screenshots.
+3. **P2:** Commit raw k6 runs as `evidence/*.txt`.
+
+**Need a pair programming session?** Not for this one — instead, let's talk about turning this into an anonymised model answer for the next cohort.

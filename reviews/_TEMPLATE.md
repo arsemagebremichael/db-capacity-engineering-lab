@@ -1,82 +1,80 @@
 <!--
-  ROB'S REVIEW TEMPLATE — copy this file to reviews/<mentee>.md and fill in.
-  Rules:
-    1. Numbers over adjectives. Every claim carries a metric, a diff, or a line ref.
-    2. Four sections, always in this order: Asked → Did well → Missed → Bottom line.
-    3. Skimmable in 60s. Tables and cards, not paragraphs. Cut every word that isn't load-bearing.
-    4. "What you missed" is ranked by points lost, and every row ends in an ACTION.
-    5. Score bars use 10 blocks: ▰ = filled, ▱ = empty (e.g. 7/10 -> ▰▰▰▰▰▰▰▱▱▱).
-  Grade bands: 90-100 Distinction · 75-89 Strong · 60-74 Pass · 40-59 Weak · <40 Incomplete
+  ENGINEERING GROWTH REVIEW — copy to reviews/<mentee>-<project>.md
+  
+  The Mentor's Golden Rules (Warm, Constructive, Ready):
+    1. Critique the Code, Champion the Coder: Assume positive intent.
+    2. Teach the Pattern: Don't just give the answer; explain the architectural 'why'.
+    3. Impact over Opinion: Frame feedback around system health (perf, scale, UX), not preference.
+    4. Unblock Immediately: Ensure they leave the review knowing exactly what to type next.
+    5. Score bars use 10 blocks: ▰ = filled, ▱ = empty (e.g., 7/10 -> ▰▰▰▰▰▰▰▱▱▱).
 -->
 
-# 📊 Review — <Mentee Name>
+# 🛠️ Engineering Review: <Mentee Name>
 
-| Field | Value |
+| Snapshot | |
 |---|---|
-| **Submission** | `<repo / PR link>` @ `<commit>` |
-| **Reviewed** | `<YYYY-MM-DD>` · `<reviewer>` |
-| **Assessed against** | `<rubric / brief>` |
-| **Score** | **NN / 100** |
-| **Grade** | `<Distinction / Strong / Pass / Weak / Incomplete>` |
-| **Verdict** | `<one line, ≤15 words>` |
+| **Target** | `<repo / PR link>` @ `<commit>` |
+| **Reviewer** | `<Your Name>` · `<YYYY-MM-DD>` |
+| **Status** | `<Ready to Merge / Needs Refactor / Blocked>` |
+| **Superpower Shown** | `<E.g., Great defensive programming on the API boundary>` |
+| **TL;DR** | `<One warm, concise sentence summarizing the review, e.g., "Incredible progress on the UI, let's just tighten up the state management before we ship.">` |
 
 ---
 
-## 🎯 Scorecard
+## 🧭 1. System Health *(How this PR measures up)*
 
-| Section | Weight | Score | | 1-line note |
+| Vector | Health | Score | | Mentor's Note |
 |---|--:|--:|---|---|
-| <Section A> | 20 | 18 | ▰▰▰▰▰▰▰▰▰▱ | <what earned / lost the points> |
-| <Section B> | 20 |  0 | ▱▱▱▱▱▱▱▱▱▱ | <not attempted> |
-| <Section C> | 20 |    |            |  |
-| <Synthesis> |  8 |    |            |  |
-| <Quality>   |  4 |    |            |  |
+| <Architecture / Logic> | 30 | 25 | ▰▰▰▰▰▰▰▰▱▱ | <E.g., Clean separation of concerns; great custom hooks.> |
+| <Code Quality / DRY> | 30 | 20 | ▰▰▰▰▰▰▱▱▱▱ | <E.g., Some repeated logic in the table rows we can extract.> |
+| <Testing / Edge Cases> | 20 | 10 | ▰▰▰▱▱▱▱▱▱▱ | <E.g., Happy paths are covered, but missing null states.> |
+| <Perf / Scalability> | 20 | 18 | ▰▰▰▰▰▰▰▰▰▱ | <E.g., O(1) lookups on the data transformation—excellent.> |
 | **Total** | **100** | **NN** | | |
 
 ---
 
-## 1. 📋 What was asked  *(did the deliverables land?)*
+## 🎯 2. The Baseline *(Deliverables check)*
 
-| # | Deliverable | Required? | Status | Evidence / where |
-|---|---|:--:|:--:|---|
-| 1 | <deliverable> | ✅ | ✅ Done | `<file / link>` |
-| 2 | <deliverable> | ✅ | ⚠️ Partial | `<file / link>` |
-| 3 | <deliverable> | ✅ | ❌ Missing | — |
+| Status | Feature / Requirement | Evidence / Location |
+|:--:|---|---|
+| ✅ | <Deliverable 1> | `auth.service.ts` (L45-80) |
+| 🚧 | <Deliverable 2> | Working, but throws console errors on unmount |
+| ❌ | <Deliverable 3> | — |
 
-> **Legend:** ✅ complete · ⚠️ partial · ❌ missing · ➖ n/a
-
----
-
-## 2. ✅ What you did well  *(evidence, not praise — each line has a number)*
-
-- **<Strength>** — `<the metric / diff / line ref that proves it>`
-- **<Strength>** — `<number>`
-- **<Strength>** — `<number>`
-
-<!-- Cap at ~5. If a bullet has no number or artifact, cut it. -->
+> **Legend:** ✅ Nailed it · 🚧 Needs a tweak · ❌ Missing / Blocked
 
 ---
 
-## 3. ⚠️ What you missed  *(ranked by points lost — every row ends in an action)*
+## 🌟 3. What You Nailed *(Keep doing this)*
 
-| Rank | Gap | Impact | Pts lost | 👉 Do this |
-|:--:|---|---|:--:|---|
-| 1 | <biggest gap> | <consequence, with number> | −N | <specific action> |
-| 2 | <gap> | <consequence> | −N | <specific action> |
-| 3 | <gap> | <consequence> | −N | <specific action> |
+*These are the patterns you executed perfectly. Add these to your engineering toolbelt.*
+
+- **<Concept, e.g., Memoization>** — `<Metric/Proof: You avoided unnecessary re-renders in the heavy list component by wrapping it in useMemo (List.tsx L12). Huge win for low-end devices.>`
+- **<Concept>** — `<Metric/Proof>`
+- **<Concept>** — `<Metric/Proof>`
 
 ---
 
-## 4. 🧾 Bottom line  *(facts + next moves)*
+## 💡 4. The Refactor Zone *(Where we level up)*
 
-**Facts**
-- `<fact with number>`
-- `<fact with number>`
-- `<fact with number>`
+*Here is how we evolve this code for production scale.*
 
-**Do next — in order**
-1. <highest-leverage action>
-2. <next>
-3. <next>
+| 🔴 Priority | The Challenge | System Impact | 🛠️ The Next-Level Pattern |
+|:--:|---|---|---|
+| **High** | <E.g., N+1 Database Query> | <E.g., Works locally, but will crash the DB when users > 1000.> | **Fix:** Batch the query using DataLoader.<br>**Principle:** Network/DB calls inside loops scale linearly. We always batch. |
+| **Med** | <E.g., Magic Strings> | <E.g., Harder to maintain; typos won't be caught by TS.> | **Fix:** Extract 'pending', 'active' to an Enum.<br>**Principle:** Let the compiler do the work for you. |
+| **Low** | <Challenge> | <Consequence> | **Fix:** <Action><br>**Principle:** <Why this matters> |
 
-**Grade: NN/100 — `<band>`.** `<one sentence: the single most important thing to change>`
+---
+
+## 🚀 5. Getting to 'Approved' *(Your Action Plan)*
+
+**Mentor's Note:**
+> `<1-2 warm sentences of reality. E.g., "You cracked the hardest part of this feature—the logic is brilliant. Our only gap right now is making sure it doesn't break when the API fails.">`
+
+**Let's knock these out in order:**
+1. **P0:** <Highest-leverage unblocking action, e.g., Wrap the fetch call in a try/catch block and handle the 500 error state.>
+2. **P1:** <Next action>
+3. **P2:** <Next action>
+
+**Need a pair programming session on P0?** `<Yes/No - Ping me on Slack if you're stuck for more than 15 mins.>`

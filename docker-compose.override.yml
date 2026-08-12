@@ -1,0 +1,25 @@
+# Local-only override.
+#
+# The stock compose file pins `container_name: prometheus` / `grafana`, which
+# collide with exited containers belonging to the unrelated
+# `devops-satellite-telemetry` project on this machine. Renaming this lab's
+# monitoring containers avoids touching that project at all.
+#
+# Nothing else changes: same images, same ports, same volumes, same network.
+#
+# Host port 3000 is also contested: a Ruby/Rails dev server holds
+# 127.0.0.1:3000 and [::1]:3000. Docker only gets the *:3000 wildcard, and
+# loopback-specific binds win, so `curl localhost:3000` reached Rails instead of
+# capacity-api. We publish the API on host port 3010 instead and point k6 at it
+# with `-e BASE_URL=http://localhost:3010`. The container still listens on 3000
+# internally, so Prometheus's `capacity-api:3000` scrape target is unaffected.
+services:
+  capacity-api:
+    ports:
+      - "3010:3000"
+
+  prometheus:
+    container_name: caplab-prometheus
+
+  grafana:
+    container_name: caplab-grafana

@@ -1,0 +1,13 @@
+===============================================================================
+OPS-2202 — P3a pool A/B, REDONE. The first A/B in this file was INVALID:
+'MYSQL_POOL_SIZE=2 docker compose up' never reached the container, so both arms
+ran at 25. Env plumbing fixed in docker-compose.override.yml and verified with
+'docker compose exec capacity-api env'. MAX_INFLIGHT=4096 (shedding effectively
+OFF) so this isolates pool size only.
+PREDICTION P3a: no change. 3,391 req/s +/-5%.
+Captured: 2026-08-12T05:04:35Z UTC
+===============================================================================
+pair 1  MYSQL_POOL_SIZE=2 (verified)  rps=3484.170951  p(95)=608.45ms  fail=0.00%
+pair 1  MYSQL_POOL_SIZE=25 (verified)  rps=3470.031784  p(95)=638.11ms  fail=0.00%
+pair 2  MYSQL_POOL_SIZE=2 (verified)  rps=3339.957461  p(95)=664.99ms  fail=0.00%
+pair 2  MYSQL_POOL_SIZE=25 (verified)  rps=3424.461863  p(95)=607.25ms  fail=0.00%

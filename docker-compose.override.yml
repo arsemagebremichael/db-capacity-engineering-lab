@@ -17,6 +17,15 @@ services:
   capacity-api:
     ports:
       - "3010:3000"
+    # Expose tuning knobs to the shell so experiments can vary them without a
+    # rebuild. NOTE: `VAR=x docker compose up` does NOT reach the container
+    # unless the variable is declared here -- compose only forwards what the
+    # compose file names. Two experiments were silently invalidated by that
+    # before this block existed (see LAB_JOURNAL.md, OPS-2202).
+    environment:
+      MYSQL_POOL_SIZE: "${MYSQL_POOL_SIZE:-25}"
+      MAX_INFLIGHT: "${MAX_INFLIGHT:-32}"
+      WORKERS: "${WORKERS:-1}"
 
   prometheus:
     container_name: caplab-prometheus

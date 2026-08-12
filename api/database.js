@@ -19,12 +19,26 @@ const MYSQL_CONFIG = {
   password: process.env.MYSQL_PASSWORD || 'labpassword',
   database: process.env.MYSQL_DATABASE || 'capacity_lab',
 
-  // Keep the pool small so we don't overwhelm the database with connections.
+  // OPS-2202. Sized from Little's Law rather than by feel:
+  //   N = lambda x W_db = 3,391.6 req/s x 0.0531 ms = 0.18 connections.
+  // Two connections were already ~11x more than the measured load needs; during
+  // the 2000-VU surge the pool ran at 9.0% utilization and Max_used_connections
+  // never exceeded 3. The pool was NOT the bottleneck -- the single JS thread
+  // was, at 0.295 ms/req => 3,391 req/s.
+  //
+  // 25 is set for headroom against the slow path that DOES hold connections:
+  // POST /admit holds one for ~508 ms (OPS-2203), so N = lambda x W there is
+  // the sizing case, not the fast reads. It is deliberately well under MySQL's
+  // max_connections=151.
+  //
+  // This change is expected to be a NO-OP for throughput; see LAB_JOURNAL.md
+  // prediction P3a. It is committed because the old value was wrong for the
+  // admit path, not because it fixes OPS-2202.
   waitForConnections: true,
-  connectionLimit: 2,
+  connectionLimit: Number(process.env.MYSQL_POOL_SIZE || 25),
   queueLimit: 0,
   connectTimeout: 10_000,
-  maxIdle: 2,
+  maxIdle: 10,
   idleTimeout: 60_000,
   enableKeepAlive: true,
 };

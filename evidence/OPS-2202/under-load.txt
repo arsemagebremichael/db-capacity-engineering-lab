@@ -1,0 +1,39 @@
+OPS-2202 — saturation evidence DURING the 2000-VU surge
+Captured: 2026-08-12T04:21:13Z UTC
+
+--- sample 1 unix=1786508473 ---
+capacity-api: CPU=173.62% MEM=95.05MiB / 160MiB
+mysql-db: CPU=21.91% MEM=508.3MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+  mysql: Threads_running=2 Max_used_connections=3
+--- sample 2 unix=1786508476 ---
+capacity-api: CPU=168.73% MEM=96.57MiB / 160MiB
+mysql-db: CPU=20.94% MEM=508.3MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+  mysql: Threads_running=3 Max_used_connections=3
+--- sample 3 unix=1786508480 ---
+capacity-api: CPU=174.52% MEM=95.98MiB / 160MiB
+mysql-db: CPU=21.20% MEM=508.3MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+  mysql: Threads_running=3 Max_used_connections=3
+--- sample 4 unix=1786508483 ---
+capacity-api: CPU=170.98% MEM=95.5MiB / 160MiB
+mysql-db: CPU=20.66% MEM=508.6MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+  mysql: Threads_running=3 Max_used_connections=3
+--- sample 5 unix=1786508488 ---
+capacity-api: CPU=163.78% MEM=94.64MiB / 160MiB
+mysql-db: CPU=21.26% MEM=508.3MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=1 sleeping=1
+  mysql: Threads_running=2 Max_used_connections=3
+--- sample 6 unix=1786508492 ---
+capacity-api: CPU=174.67% MEM=95.05MiB / 160MiB
+mysql-db: CPU=21.03% MEM=508.3MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=1 sleeping=1
+  mysql: Threads_running=3 Max_used_connections=3

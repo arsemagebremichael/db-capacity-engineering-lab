@@ -50,6 +50,17 @@ CREATE TABLE patients (
   created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- OPS-2201: index the column the patient-lookup endpoint filters on. Without
+-- it, GET /api/patients/search runs a full table scan: 100,000 rows examined to
+-- return 10,000 (10:1). With it, 10,000 examined for 10,000 returned (1:1) and
+-- MySQL time per search falls 20.25ms -> 8.1ms.
+--
+-- Note this alone did NOT raise throughput (34.09 -> 34.64 req/s, inside run
+-- variance): it lowers the pool/DB ceiling from 98.8 to ~247 req/s, which was
+-- not the binding constraint. The event loop was, at 34.5 req/s. The index is
+-- correct work that buys headroom; see LAB_JOURNAL.md OPS-2201.
+CREATE INDEX idx_patients_last_name ON patients(last_name);
+
 CREATE TABLE hospitals (
   id             INT AUTO_INCREMENT PRIMARY KEY,
   name           VARCHAR(128) NOT NULL,

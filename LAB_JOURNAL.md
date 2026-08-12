@@ -846,6 +846,22 @@ defect.
 
 #### Summary — before → after
 
+![OPS-2201 throughput across all three fixes](evidence/OPS-2201/grafana-throughput-ALL.png)
+
+*Grafana "Throughput (req/s) by route", window `1786506075` → `1786507615`
+(03:41–04:07 UTC), covering the whole incident: three pre-fix runs, the index
+fix, the projection fix, then pagination. The spike to ~4,250 req/s at 04:02 is
+step C.*
+
+> **Caveat, stated because it changes what this image proves: the y-axis is
+> LINEAR.** At that scale the entire pre-pagination history — the ~34 req/s
+> baseline, the ~34 req/s *after the index*, and the ~52 req/s after the
+> projection — is compressed flat against zero and cannot be distinguished. The
+> image therefore shows the **magnitude** of the final fix, but **not** the
+> finding that the index changed nothing, which is the argumentative part.
+> **A log-scale y-axis is needed to show all four phases**; the numbers in the
+> tables above are the authoritative record either way.
+
 | Metric | before | after | factor | vs. noise floor |
 |---|---:|---:|---:|---|
 | **Throughput** | 34.09 req/s | **4,247 req/s** | **124.6×** | RPS noise ±1% — overwhelming signal |

@@ -102,7 +102,7 @@ step does nothing and the last one changes everything.
 
 | Save as | Panel | Window (unix) | Peak rps | What it should show |
 |---|---|---|---|---|
-| `OPS-2201/grafana-throughput-ALL.png` | 1 — Throughput | `1786506075` → `1786507615` | — | **Primary shot.** Log y-axis. Whole arc: 34 → 34 → 52 → 4,250. |
+| ✅ `OPS-2201/grafana-throughput-ALL.png` | 1 — Throughput | `1786506075` → `1786507615` | — | **CAPTURED — but on a LINEAR y-axis, so only the final 4,250 req/s spike is legible; the 34 / 34 / 52 phases are flat against zero. RE-SHOOT WITH LOG SCALE** to show the whole arc, which is where the "index changed nothing" finding lives. |
 | `OPS-2201/grafana-throughput-before.png` | 1 — Throughput | `1786506185` → `1786506235` | 34.3 | Flat ~34 req/s plateau under unbounded offered load = a ceiling, not a slope. This is the observed run with timestamped MySQL sampling. |
 | `OPS-2201/grafana-p95-before.png` | 2 — p95 latency | `1786506185` → `1786506235` | — | `/api/patients/search` p95 at ~7 s against a baseline band of 19 ms. |
 | `OPS-2201/grafana-memory-before.png` | 3 — Memory vs limit | `1786506285` → `1786506325` | 34.6 | RSS peaking 148.7 MiB against the 160 MiB cap — 93%. Draw the 160 MiB line. |

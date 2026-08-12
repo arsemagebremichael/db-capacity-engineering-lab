@@ -99,8 +99,14 @@ app.get('/api/patients/search', async (req, res) => {
   const lastName = req.query.lastName || '';
   try {
     const pool = getPool();
+    // Project only the columns a search result list renders. `notes` is a TEXT
+    // column averaging 180 chars/row — ~52% of the serialized payload — and is
+    // never shown in a result list. Shipping it made every search response
+    // 3.47 MiB, which the single JS thread then had to JSON.stringify.
+    // /api/patients/export is a separate handler with its own SQL (see below),
+    // so the analytics extract is unaffected by this projection.
     const [rows] = await pool.query(
-      'SELECT * FROM patients WHERE last_name = ?',
+      'SELECT id, first_name, last_name, email, diagnosis, created_at FROM patients WHERE last_name = ?',
       [lastName]
     );
     res.json({ count: rows.length, lastName, data: rows });

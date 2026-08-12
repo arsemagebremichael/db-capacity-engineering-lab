@@ -1,3 +1,47 @@
+> ## 📋 My submission — Arsema G. Gebremichael, 2026-08-12
+>
+> **Findings:** [`LAB_JOURNAL.md`](./LAB_JOURNAL.md) · **Scar log:** [`SCARS.md`](./SCARS.md) · **Raw evidence:** [`evidence/`](./evidence/)
+>
+> | Incident | Status | Headline (all measured) |
+> |---|---|---|
+> | Baseline | ✅ | 3 runs + variance. **p95 varies 24% run-to-run, p99 99%** — so p99 is treated as inadmissible evidence throughout |
+> | **OPS-2201** | ✅ fixed & verified | **34.09 → 4,247 req/s (124.6×)**. Not from the index the ticket implied — that made the DB 2.5× faster and moved throughput +1.6% |
+> | **OPS-2202** | ✅ fixed & verified | Pool was **9% utilized**; the bottleneck was one JS thread at 3,391 req/s. Pool raise was a **documented no-op (+1.0%)** |
+> | OPS-2203 | ⛔ **not investigated** | Never reproduced. Pre-registered predictions left standing, marked untested |
+> | OPS-2204 | ⛔ **not investigated** | Never reproduced. One adjacent measurement: 1-VU export = 34.47 MiB, did not OOM |
+>
+> **Why two of four:** each was worked to the rubric's standard — reproduce,
+> evidence, mechanism + capacity arithmetic, one concern per commit, re-measure
+> against a known noise floor. That is slower than four thin write-ups, and I
+> chose depth. The two undone are marked undone rather than padded.
+>
+> **Three things worth your time if you read nothing else:**
+> 1. **The obvious fix didn't work, and the journal proves it rather than
+>    asserting it.** OPS-2201's index cut rows examined 10× and MySQL time 2.5×,
+>    and users saw nothing, because it lowered a ceiling that wasn't binding.
+> 2. **A detector I recommended after one incident was falsified by the next.**
+>    `nodejs_eventloop_lag_p99` moved in OPS-2201 and stayed flat through
+>    OPS-2202's 36× brownout — it samples per-turn delay, not queue depth. The
+>    replacement is stated as *tested against 2 of 2, not proven*, with named
+>    falsifiers.
+> 3. **Two of my own experiments silently measured nothing** — harness polling
+>    contending with the system under test, and env vars that never reached the
+>    container. Both are written up rather than quietly re-run, because both
+>    returned clean-looking tables.
+>
+> **10 predictions were pre-registered before measurement: 4 hit, 6 missed.** The
+> misses are the most useful rows in the journal — each resolved into a specific
+> named missing term.
+>
+> **Reproducing my runs:** the API is published on host port **3010** (a local
+> Rails server holds 3000) — pass `-e BASE_URL=http://localhost:3010` to every k6
+> command. See [`docker-compose.override.yml`](./docker-compose.override.yml).
+> **Avoid `docker compose down`:** the `prometheus` service has no data volume,
+> so a teardown destroys every metrics window listed in
+> [`evidence/grafana-captures.md`](./evidence/grafana-captures.md).
+
+---
+
 # Regional Health — Reliability On-Call Lab 🧪
 
 A hands-on "Lab-in-a-Box" for learning **database mechanics, performance tuning,

@@ -65,6 +65,7 @@ Raw summaries: [`evidence/baseline/run-1.txt`](evidence/baseline/run-1.txt),
 | Error rate          | **0.00%** (0 of 1500, all three runs) |
 | Peak API heap used  | **22.17 MiB** (21.98 – 22.37) |
 
+
 ### Run-to-run variance — the noise floor
 
 This is the table that decides whether a later "improvement" is real. Spread =
@@ -768,6 +769,27 @@ all three measurements with 0.0% error, but that is **interpolation, not
 validation** — three parameters fitted to three points. It earns no predictive
 credit until tested against a fourth point it has not seen.
 
+#### The two-image argument: the constraint never moved
+
+These two panels belong side by side. Together they make the argument that no
+table of numbers makes as quickly.
+
+| ![OPS-2201 throughput after the index fix](evidence/OPS-2201/grafana-throughput-fixA.png) | ![OPS-2201 CPU vs throughput](evidence/OPS-2201/prom-eventloop-cpu.png) |
+|---|---|
+| **Panel 1 — Throughput by route**, window `1786506815` → `1786507025`, immediately after `CREATE INDEX`. | **`rate(process_cpu_seconds_total{app="capacity-api"}[10s])`**, window `1786506185` → `1786507415`, spanning the before / index / projection phases. |
+| *A flat line where the ticket's implied fix should have produced a step.* Rows examined fell 10×, MySQL service time fell 2.5×, and throughput stayed at ~35 req/s. | *The same CPU ceiling at two different throughputs.* ~1.48 cores pinned through both the 34 req/s and the 52 req/s phases. |
+
+> **Caption: the constraint never moved.** The left panel shows a correct
+> database fix producing no user-visible change, because it lowered a ceiling
+> (98.8 req/s) that was not binding. The right panel shows why: API-process CPU
+> was pinned at the same ~1.48 cores before and after, so the binding resource
+> was identical in both phases — only the work per request changed. A fix can be
+> right, verifiable, and invisible at the same time.
+
+*(Both images are Grafana/Prometheus captures — see
+[`evidence/grafana-captures.md`](evidence/grafana-captures.md) for the exact
+panel, PromQL and window. Placeholders until shot.)*
+
 #### Blast radius, re-tested → [`evidence/OPS-2201/fixC-blast-radius.txt`](evidence/OPS-2201/fixC-blast-radius.txt)
 
 The original diagnosis said the search storm was starving *every* endpoint. If
@@ -888,38 +910,426 @@ being interpolation. If it misses, the miss names the missing term — which is
 worth more than the fit was.
 
 ### Hypothesis
-> Given the query is trivial and the DB is idle yet requests pile up, I think
-> the bottleneck is ________________________________________________________
-> because __________________________________________________________________.
+
+**My original hypothesis, written at the start of the lab from reading the
+source:** `connectionLimit: 2` in [`api/database.js`](api/database.js#L25) with
+`queueLimit: 0` (unbounded) means requests wait for a connection in an
+app-tier queue. The DB looks idle because it *is* idle — it only ever sees 2
+concurrent queries — while 2,000 requests pile up in front of the pool.
+
+**I now think that hypothesis is wrong, and I am recording why before running,
+so the correction is not retrofitted.** OPS-2201 taught me to check *which*
+ceiling binds rather than assume the obvious one. Measuring the inputs first:
+
+| Input | Measured |
+|---|---|
+| `/recent` MySQL service time `W_db` | **0.0531 ms** (perf_schema, 200 execs, 50 examined / 50 sent) |
+| `/recent` payload | **18,145 B**, 50 rows |
+| `/recent` total W at 1 VU | 0.714 ms avg |
+
+```
+Pool ceiling      = pool / W_db = 2 / 0.0000531 s   = 37,665 req/s
+Event-loop ceiling (3-term model, now out-of-sample validated at +9.4%):
+  js_ms = 0.1391 + (4.692e-6 x 18145) + (1.213e-3 x 50)
+        = 0.1391 + 0.0851 + 0.0607 = 0.2849 ms      =  3,510 req/s
+```
+
+**The pool ceiling is 10.7× higher than the event-loop ceiling.** The query is
+so cheap (0.0531 ms) that 2 connections can serve 37,665 req/s — far more than
+the single JS thread can ever feed it.
+
+> **PREDICTION P4 — the pool is NOT the binding constraint in OPS-2202 either.**
+> Predicted throughput **~3,510 req/s**, bound by API-process CPU.
+> Predicted pool utilization `L = λ·W_db` = 3,510 × 0.0531 ms = **0.19 of 2
+> connections ≈ 9.3%**.
+>
+> **Falsifier:** both pool connections busy at ~100% with throughput pinned near
+> `2/W_db`, or a measured pool-acquire wait that dominates request latency. Any
+> of those and the pool genuinely binds and P4 is dead.
+
+**On the ticket's errors.** The reporter says requests "return 500s", and the k6
+script sets `http_req_failed: rate<0.05`. Nothing in the pool path can *error*:
+`queueLimit: 0` means the queue is unbounded, so requests wait forever rather
+than being rejected, and there is no acquire timeout configured. So **if errors
+appear, they cannot be pool-rejection errors** — they must come from somewhere
+else. My prediction is the TCP layer: 2,000 VUs arriving in a 5 s ramp against
+Node's default `listen()` backlog (511) should produce connection resets or
+refusals at the client, which k6 counts as failures. Recorded as a distinct,
+separately falsifiable claim from P4.
+
+**What I expect to be RIGHT about in the original hypothesis:** the reporter's
+"the DB is bored" observation, and the fact that time is spent *before* the
+query rather than in it. What I expect to be WRONG about: *which* pre-query
+resource the time is spent waiting for — the connection pool versus the event
+loop. That distinction is the entire incident, and it is the same distinction
+OPS-2201 turned on.
 
 ### Observation (evidence)
-> Where is time spent between request arrival and query execution? Capture the
-> error codes and any queue/timeout evidence from logs and metrics:
-> ```
+
+Raw: [`evidence/OPS-2202/k6-before.txt`](evidence/OPS-2202/k6-before.txt),
+[`under-load.txt`](evidence/OPS-2202/under-load.txt),
+[`P3b-out-of-sample.txt`](evidence/OPS-2202/P3b-out-of-sample.txt).
+Run window: unix `1786508464` → `1786508495`.
+
+**1. P4 confirmed — the pool is not the constraint.**
+
+| | predicted | measured | error |
+|---|---:|---:|---:|
+| Throughput | 3,510 req/s | **3,391.6 req/s** (plateau 3,240–3,510) | **−3.4%** |
+| Pool utilization | 9.3% | **9.0%** (`L = λ·W_db` = 3,391.6 × 0.0531 ms = 0.18 of 2) | — |
+
+Direct observation of the pool during the surge — 6 samples, every one of them
+showing at most **1 of 2** connections executing:
+
+```
+capacity-api: CPU=173.62%  mysql-db: CPU=21.91%   mysql: app_conns=2 running=0 sleeping=2
+capacity-api: CPU=168.73%  mysql-db: CPU=20.94%   mysql: app_conns=2 running=0 sleeping=2
+capacity-api: CPU=174.52%  mysql-db: CPU=21.20%   mysql: app_conns=2 running=0 sleeping=2
+capacity-api: CPU=170.98%  mysql-db: CPU=20.66%   mysql: app_conns=2 running=0 sleeping=2
+capacity-api: CPU=163.78%  mysql-db: CPU=21.26%   mysql: app_conns=2 running=1 sleeping=1
+capacity-api: CPU=174.67%  mysql-db: CPU=21.03%   mysql: app_conns=2 running=1 sleeping=1
+```
+
+`Max_used_connections = 3` (2 app + 1 monitoring shell) for the whole run. **The
+2-connection pool never filled.** It cannot be the thing 2,000 requests are
+queueing behind.
+
+**2. The saturated resource is again API-process CPU.** `rate(process_cpu_seconds_total)`
+= **1.63–1.68 cores** sustained, against MySQL at **21%**. Implied JS cost per
+request = 1/3,391.6 = **0.295 ms**, versus the model's predicted 0.2849 ms — a
+**3.4% match** on an endpoint whose payload the model had never been fitted to.
+
+**3. Where the time actually goes — it is a queue, and Little's Law locates it.**
+`nodejs_active_handles{type="Socket"}` = **2,005** during the plateau: every VU
+holds an accepted, open connection. So the requests are *inside the process*,
+not waiting at the TCP layer and not waiting on MySQL.
+
+```
+L = 2,000 in-flight requests
+λ = 3,391.6 req/s
+W = L/λ = 2,000 / 3,391.6 = 0.590 s predicted mean latency
+k6 measured avg = 0.536 s, median 0.563 s   -> 10% model error
+```
+
+The time between request arrival and query execution is spent **waiting for the
+single JS thread to get to that request** — not waiting for a connection.
+
+**4. The reporter's "500s" DO NOT REPRODUCE — and neither did my own error
+prediction.**
+
+| | |
+|---|---|
+| `http_req_failed` | **0.00% — 0 of 103,760 requests** |
+| Status codes seen | **200 only** (Prometheus `by (status_code)`) |
+| `db_errors_total` | **no data — zero, no series ever created** |
+
+I predicted errors would appear from the TCP accept backlog. **Wrong — there
+were none at all.** 2,005 sockets were accepted cleanly. Both the ticket's
+account of the failure mode and my replacement for it were incorrect.
+
+**5. What DOES reproduce is severe latency degradation with zero failures:**
+
+| Metric | Value | vs. baseline |
+|---|---|---|
+| Successful RPS (plateau) | **3,391.6 req/s** | offered load unbounded; a hard ceiling |
+| p95 latency | **696.02 ms** | **36× worse** than 19.30 ms — far outside the ±25% admissible band ✅ |
+| p50 latency | 562.60 ms | 92× worse than 6.12 ms |
+| Error / timeout rate | **0.00%** | unchanged |
+| Avg MySQL service time per query | **0.0531 ms** | 50 rows examined / 50 sent, 1:1 |
+| Peak RSS | 96.6 MiB / 160 MiB (60%) | vs 98.6 MiB baseline — **no memory pressure** |
+| Event-loop lag (mean / p99) | 10 ms / 12–14 ms | see caveat below |
+
+**SLO verdict: p95 696 ms breaches the 200 ms SLO by 3.5×, while the incident's
+own k6 threshold (`http_req_failed: rate<0.05`) PASSES.** That is the second
+time in two incidents that the shipped pass/fail gate reports success through a
+severe brownout.
+
+**6. Caveat on event-loop lag — it did NOT flag this incident.** Mean lag stayed
+at 10 ms and p99 at 12–14 ms throughout, essentially unchanged from idle. This
+matters because I nominated event-loop lag as the detector for OPS-2201, and
+here it is nearly silent while the event loop is the saturated resource.
+
+The reason is what the metric measures: `prom-client` samples the delay of a
+scheduled timer. Each individual request callback here is short (~0.3 ms), so
+the loop cycles promptly and any single timer fires close to schedule. What is
+long is the **number of callbacks queued ahead of you** — 2,000 of them. Lag
+measures *per-turn* delay, not *queue depth*. **A saturated event loop serving
+many cheap callbacks shows low lag.** OPS-2201's larger 29 ms callbacks did move
+it (29 ms mean, 45 ms p99), which is precisely why I over-generalized from it.
+Corrected detector guidance goes in the root-cause section.
+
+### Pre-registered predictions for the fixes (written before shipping any of them)
+
+**P3a — raising the pool changes nothing.** The pool sits at 9.0% utilization.
+Raising `connectionLimit` 2 → 25 moves the pool ceiling from 37,665 req/s to
+470,000 req/s, neither of which is binding.
+
+> **Predicted: `/recent` throughput after the pool raise = 3,391 req/s ± 5%
+> (3,221–3,561). Search = 4,247 req/s ± 5%.** Both unchanged.
+> **Falsifier:** either rises more than 10%.
+
+**P5 — admission control (bounded in-flight + fast 503).** Shipping
+`MAX_INFLIGHT = 64`, chosen from Little's Law rather than taste: to hold admitted
+latency at ~25% of the 200 ms SLO, `N = λ · W_target` = 3,391 × 0.05 s ≈ 170, and
+64 is deliberately tighter to keep queue delay near service time.
+
+The prediction has a genuine complication I want on record **before** measuring,
+because it makes the rejection-rate number soft while leaving the latency number
+firm. k6 runs a **closed loop**: a rejected VU gets its 503 almost instantly and
+immediately re-sends. So rejecting requests *increases* the offered rate. The
+rejection rate is therefore not a property of the incident alone — it is a fixed
+point between server capacity and how fast rejected clients retry. Rejection also
+is not free: each 503 still costs socket accept, routing and a write on the same
+JS thread. Splitting the thread budget:
+
+```
+  λ_admitted x c_admit  +  λ_rejected x c_reject  =  1.0 core-second/second
+  c_admit  = 0.295 ms/req   (measured: 1 / 3,391.6)
+  c_reject = NOT MEASURED   (predicted ~0.05-0.10 ms: accept + route + write,
+                             no DB round-trip, no row objects, tiny body)
+```
+
+> **P5a — admitted p95: predicted 15–40 ms.** From `W = N/λ_a` = 64 / ~2,600 ≈
+> 25 ms. **This is the firm prediction and the one that tests the mechanism.**
+> Against 696 ms today and a 1-VU service time of 0.714 ms, it says the queue —
+> not the work — was the entire problem.
+> **P5b — admitted throughput: predicted 2,000–3,300 req/s**, i.e. *below*
+> today's 3,391, because rejection work steals thread time from real work.
+> **P5c — rejection rate: predicted > 50%**, soft for the closed-loop reason
+> above. I will report offered rate alongside it so the number is interpretable.
+> **P5d — SLO: admitted p95 inside 200 ms.** The point of the whole change.
 >
-> ```
-| Metric                    | Value | vs. baseline |
-|---------------------------|-------|--------------|
-| Successful RPS (plateau)  |       |              |
-| p95 / p99 latency         |       |              |
-| Error / timeout rate      |       |              |
-| Avg service time per query (s) |  |              |
+> **Falsifier for the mechanism story:** admitted p95 landing far above ~40 ms
+> would mean bounding concurrency did *not* convert queue time into service
+> time, and my account of where the 696 ms lived is wrong.
+
+**P6 — clustering raises the ceiling without changing the failure shape.**
+Predicted `/recent` throughput with 4 workers ≈ **2–3.5× of 3,391 req/s**
+(sub-linear: the 5 containers and k6 share this host's cores). Predicted p95 at
+the *same* 2,000 VUs: **still hundreds of ms, still 0% errors** — because
+2,000 ÷ (4 × 3,391) still leaves a deep queue. **The collapse point moves; the
+collapse shape does not.**
 
 ### Root cause & mechanism
-> Explain the paradox: idle database, trivial query, stalled app. What finite
-> resource is being contended, and where does it live? Derive the *right* size
-> for that resource from your measured throughput and service time (state the
-> relationship you used):
-> - Measured avg service time W = ______ s
-> - Target throughput λ = ______ req/s
-> - Required capacity = ______  (show your working)
-> Why does making it arbitrarily large eventually stop helping? ______________
+
+**The paradox, resolved.** Idle database, trivial query, stalled app — all three
+observations are true simultaneously, and they are consistent because **the
+contended resource is not in the database at all.**
+
+- The query *is* trivial: 0.0531 ms, 50 rows examined for 50 returned (1:1).
+- The database *is* idle: 21% CPU, and its 2 connections are 91% unused.
+- The app *is* stalled: p95 696 ms, 36× baseline.
+
+**The finite resource being contended is CPU time on Node's single JS thread**,
+and it lives entirely in the **application tier**. Every request needs ~0.295 ms
+of it to parse the HTTP request, route it, build 50 row objects, serialize an
+18 KB JSON body and write it. One thread ⇒ **1 / 0.295 ms = 3,391 req/s**, and
+no amount of database headroom changes that number.
+
+**Why "the DB is bored" is true and misleading.** The DBAs are reading a real
+metric correctly and drawing a false conclusion, because they are measuring the
+wrong tier. The database is bored *precisely because* the application cannot
+feed it faster. Idleness downstream of a bottleneck is the expected signature of
+that bottleneck, not evidence against it.
+
+**Deriving the right size for the contended resource.** The template asks for the
+pool size; the honest answer is that **the pool is not the resource that needs
+sizing**, and computing it demonstrates why:
+
+```
+Relationship: required_capacity = λ_target x W   (Little's Law)
+
+If sizing the CONNECTION POOL:
+  W_db  = 0.0531 ms   (measured, perf_schema, 200 execs)
+  λ     = 3,391.6 req/s (measured plateau)
+  N     = λ x W = 3,391.6 x 0.0000531 = 0.18 connections
+
+  The pool needs 1 connection. It has 2. It is oversized by 2x, not undersized.
+
+If sizing the THREAD POOL (the resource that is actually short):
+  W_js  = 0.295 ms/req (measured: 1 / 3,391.6)
+  λ     = 3,391.6 req/s to keep up with current demand
+  N     = 3,391.6 x 0.000295 = 1.0 thread -- exactly saturated, zero headroom.
+  To serve the offered 2,000 concurrent at p95 < 200 ms:
+  λ_needed = L/W = 2,000 / 0.2 s = 10,000 req/s
+  N_needed = 10,000 x 0.000295 = 2.95 -> 3 threads minimum, 4 with headroom.
+```
+
+**Why making the pool arbitrarily large eventually stops helping — and here,
+never starts.** In the general case, connections stop helping when some
+downstream resource saturates: the DB's own CPU, its `max_connections` (151
+here), disk, or lock contention on hot rows. Past that point extra connections
+add context-switching and lock contention while throughput stays flat — the
+classic knee where a connection pool larger than the DB's core count makes
+things *worse*. In *this* system the pool never even reaches the flat part,
+because a resource **upstream** of it — the JS thread — saturates first at
+9% pool utilization. **A queue in front of an idle resource is never fixed by
+enlarging that resource.**
+
+**Corrected detector guidance (superseding what I wrote in OPS-2201).** I
+nominated `nodejs_eventloop_lag_p99_seconds` after OPS-2201. OPS-2202 falsified
+it: lag stayed at 10 ms mean / 12–14 ms p99 — indistinguishable from idle —
+while the event loop was the bottleneck. The metric samples the delay of one
+scheduled timer, so it reports **per-turn delay, not queue depth**. OPS-2201's
+29 ms callbacks perturbed it; OPS-2202's 0.3 ms callbacks do not, even with
+2,000 requests queued. Detector that survives *both* incidents is derived in the
+synthesis.
 
 ### Fix & verify
-> The change you made: ______________________________________________________
-> New RPS: ______  New error rate: ______  New p95: ______
-> What upstream protection would make a burst degrade gracefully instead of
-> collapsing? _______________________________________________________________
+
+Three commits, one mechanism each.
+
+#### A METHODOLOGY ERROR THAT INVALIDATED TWO EXPERIMENTS — recorded first
+
+Before any results: I ran a pool A/B and a full `MAX_INFLIGHT` sweep using
+`VAR=x docker compose up -d capacity-api`. **That does not inject the variable
+into the container.** Compose only forwards variables the compose file names, so
+every arm of both experiments silently ran at the *default* value. Both were
+worthless and both initially looked like clean results.
+
+**What caught it was an internal consistency check, not a hunch:** the sweep
+reported `MAX_INFLIGHT=4096` shedding **93.5%** of requests — but only 2,000 VUs
+were offered, so a 4,096 limit can reject *nothing*. A limit above the offered
+concurrency that still sheds is arithmetically impossible. That impossibility is
+what exposed the plumbing.
+
+Fixed by declaring the knobs in
+[`docker-compose.override.yml`](docker-compose.override.yml) and **verifying with
+`docker compose exec capacity-api env`** before trusting any arm. Both
+experiments were re-run from scratch. The invalidated numbers are noted in the
+evidence files rather than deleted.
+
+The lesson generalizes: **an experiment that varies a parameter must first prove
+the parameter varied.** I had a plausible-looking A/B in hand and would have
+published "the pool raise is a no-op" from a test where both arms were identical
+— reaching the right conclusion through a broken experiment, which is worse than
+being wrong, because nothing would have prompted a re-check.
+
+#### Fix 1 — connection pool 2 → 25 → [`evidence/OPS-2202/fix1-pool-AB.txt`](evidence/OPS-2202/fix1-pool-AB.txt)
+
+Alternating A/B, env verified per arm, `MAX_INFLIGHT=4096` so shedding is off:
+
+| pool | run 1 | run 2 | mean |
+|---|---:|---:|---:|
+| 2 | 3,484.2 | 3,340.0 | **3,412.1 req/s** |
+| 25 | 3,470.0 | 3,424.5 | **3,447.3 req/s** |
+
+**+1.0%. P3a ✅ CONFIRMED** (predicted 3,391 ± 5% = 3,221–3,561; both means
+inside). Search likewise measured **4,242.8 vs 4,247 predicted — −0.1%**.
+
+**The pool raise is a documented no-op**, and it is committed anyway: 2 was
+genuinely wrong for the *admit* path, where `W = 508 ms` makes the pool ceiling
+`2/0.508 = 3.9 admits/s`. It is sized for OPS-2203's needs, not OPS-2202's.
+
+#### Fix 2 — admission control → [`fix2-admission-control.txt`](evidence/OPS-2202/fix2-admission-control.txt), [`fix2-inflight-sweep.txt`](evidence/OPS-2202/fix2-inflight-sweep.txt)
+
+Bounded in-flight requests with an immediate `503 + Retry-After`; `/health` and
+`/metrics` exempt so observability survives the overload it reports.
+
+**Scoring the pre-registered predictions at the originally shipped N=64:**
+
+| | predicted | measured | |
+|---|---|---|---|
+| P5a admitted p95 | 15–40 ms | **242 ms** | ❌ **6× high** |
+| P5b admitted throughput | 2,000–3,300 req/s | **452 req/s** | ❌ **~6× low** |
+| P5c rejection rate | > 50% | **93.6%** | ✅ |
+| P5d admitted p95 < 200 ms SLO | yes | **242 ms** | ❌ breached |
+
+**3 of 4 wrong.** The measured sweep explains why:
+
+| N | total rps | shed % | admitted rps | admitted p95 |
+|---:|---:|---:|---:|---:|
+| 8 | 11,209 | 98.0% | 158 | **96 ms** |
+| 16 | 10,625 | 96.1% | 354 | **96 ms** |
+| **32** | 9,616 | 93.6% | **627** | **198 ms** ← shipped |
+| 64 | 10,093 | 93.6% | 452 | 242 ms |
+| 256 | 9,686 | 92.0% | 609 | 957 ms |
+| 1024 | 9,465 | 84.6% | 1,541 | 2,293 ms |
+| 4096 | 3,562 | **0.0%** | 3,448 | 963 ms |
+
+`N=4096` exceeds the 2,000 offered VUs, sheds nothing, and reproduces the
+un-throttled baseline — the control that proves the sweep is now real.
+
+**The mechanism I missed: rejection is not free, and instant rejection is
+self-defeating against a client that does not back off.** Each 503 still costs
+socket accept, routing and a write on the *same* single JS thread — measured at
+**~0.089 ms** (inside my predicted 0.05–0.10 ms). But k6 is a **closed loop**:
+rejecting a VU returns it instantly, so it re-sends immediately. Tightening the
+limit *raises* the arrival rate. The thread budget goes:
+
+```
+  lambda_a x c_admit + lambda_r x c_reject = 1.0 core-second/second
+  at N=64:  452 x 0.295ms  +  9,641 x 0.089ms
+         =  0.133          +  0.858            = 0.99  ✓
+```
+
+**86% of the JS thread was spent saying "no".** I flagged the closed-loop effect
+when pre-registering P5c and marked it soft — then failed to propagate it into
+P5a and P5b, which are the numbers it invalidates. Identifying a mechanism and
+then not carrying it through the arithmetic is its own kind of error.
+
+**Was it worth shipping? A qualified yes, and the qualification matters.**
+
+| | no admission control | N=32 |
+|---|---:|---:|
+| Requests served OK | 3,448 rps | **627 rps** (−82%) |
+| Served-request p95 | 963 ms | **198 ms** (inside SLO) |
+| Error rate | **0.00%** | **93.6%** |
+| Detectable by error-rate alerting | **no** | **yes** |
+
+It **trades 82% of throughput for SLO-compliant latency on survivors, plus
+visibility**. For a clinical lookup where a 1-second answer is useless, that is
+the right trade. For a bulk endpoint it would be a bad one. **The honest caveat:
+most of that cost is an artifact of a client that retries instantly.** Real
+callers honouring `Retry-After`, or shedding at the load balancer *before* the
+socket reaches Node, would keep the latency benefit without the rejection storm.
+**In-process admission control is the weakest place to shed** — it is simply the
+only place reachable from inside this codebase.
+
+#### Fix 3 — clustering → [`evidence/OPS-2202/fix3-clustering.txt`](evidence/OPS-2202/fix3-clustering.txt)
+
+| WORKERS | rps | vs 1 | p95 | peak RSS | CPU cores | error rate |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 3,374 | — | 700.5 ms | 77.3 MiB | 1.50 | 0.00% |
+| **2** | **4,991** | **1.48×** | 448 ms | 119.9 MiB | 1.43 | 0.00% |
+| 3 | 2,471 | **0.73×** | 1.13 s | 154.2 MiB (96%) | 0.77 | 0.00% |
+| 4 | 1,684 | **0.50×** | 1.61 s | 159.3 MiB (99.6%) | 0.63 | 0.00% |
+
+**P6 predicted 2–3.5×; measured 1.48× peak. ❌ MISSED — and missed in a way I
+did not anticipate at all.** I expected *sub-linear* scaling from CPU
+contention. What actually happened is **negative** scaling from memory
+exhaustion: each worker is a full V8 heap, and against a 160 MB cgroup, 3 and 4
+workers push RSS to 96% and 99.6% of the cap. CPU then *falls* from 1.50 to 0.63
+cores — the process is doing garbage collection, not work. **Four workers are
+half as fast as one.**
+
+**Clustering here is bounded by memory, not by cores.** The host has CPUs to
+spare; the container does not have heap to spare.
+
+**The half of P6 that was right, and it is the important half:** the collapse
+*shape* is unchanged. Error rate stays **0.00%** at every worker count, and p95
+stays in the hundreds of milliseconds to seconds. Clustering moved the cliff
+(1→2 workers) and then walked off a different one (3–4). **It never made
+overload visible or bounded — only admission control did that.** This is
+precisely the argument for shipping admission control first.
+
+**Shipped default: `WORKERS=1`.** Two workers measured fastest, but 119.9 MiB of
+a 160 MiB budget leaves ~40 MiB of headroom, and OPS-2204's export needs
+**34.5 MiB per concurrent call**. Enabling clustering by default would make the
+next incident materially worse. The capability ships; the default does not.
+**Forward reference: OPS-2204 is already visible here** — memory, not CPU, is
+what actually limits this container.
+
+**Upstream protection that would make a burst degrade gracefully:** in
+descending order of effectiveness, and the reason each beats the one below it —
+(1) **shed at the edge** (LB/ingress concurrency limit), which rejects before a
+socket, a thread or a heap allocation is spent in Node, avoiding the rejection
+storm measured above entirely; (2) **client-side exponential backoff with jitter
+plus honouring `Retry-After`**, which breaks the closed-loop amplification at
+its source; (3) **in-process admission control** (what shipped), which works but
+pays ~0.089 ms per rejection out of the very resource that is scarce; (4) more
+capacity via clustering, which raises the cliff without changing what happens at
+it. **Only (1)–(3) change the failure shape. (4) only moves it.**
 
 ---
 
@@ -1022,11 +1432,97 @@ is more informative than any individual result. Updated as each incident closes.
 | 2201-A | Index will not change throughput (~34.5 req/s) | ✅ **Hit** — 34.64 | Constraint attribution was right |
 | 2201-B | Projection → 65–75 req/s | ❌ **Missed high** — 51.13 | Cost is not bytes-only; there is a **per-row** term (1.21 µs/row) that dropping columns cannot touch |
 | 2201-C | Constraint leaves the event loop; several hundred req/s | ❌ **Wrong on mechanism** — 4,247 req/s, still event-loop bound | There is a **fixed per-request** term (0.139 ms) — and a 125× ceiling rise need not move the constraint |
-| P3a | Pool raise won't change search throughput | ⏳ pending 2202 | — |
-| P3b | `limit=200` → ~1,120 req/s (±20%) | ⏳ pending 2202 | first genuine out-of-sample test of the cost model |
+| P3a | Pool raise won't change throughput (3,391 ±5%) | ✅ **Hit** — 3,412 → 3,447, **+1.0%**; search −0.1% | Constraint attribution held under a real A/B |
+| P3b | `limit=200` → ~1,120 req/s (±20%) | ❌ **Missed** — 2,084 | I applied a "realization factor" to a model **already fitted on achieved throughputs**, double-counting host contention. Applied correctly: **1,905 predicted vs 2,084 measured, +9.4%, out-of-sample.** Both numbers stand; the registered one is a miss |
+| P4 | 2202's pool is not the constraint; ~3,510 req/s | ✅ **Hit** — 3,391.6, **−3.4%**; pool 9.0% vs 9.3% predicted | — |
+| P4-err | Errors will come from the TCP accept backlog | ❌ **Wrong** — 0.00% errors, 2,005 sockets accepted cleanly | I was right the ticket's error story was wrong, and wrong about the replacement |
+| P5a | Admitted p95 15–40 ms | ❌ **Missed** — 242 ms at N=64 | Rejection costs ~0.089 ms of the **same** thread; a non-backing-off client turns a tight limit into a rejection storm consuming **86%** of the budget |
+| P5b | Admitted throughput 2,000–3,300 | ❌ **Missed** — 452 req/s | Same cause. I flagged the closed-loop effect for P5c and **failed to propagate it** into P5a/P5b |
+| P5c | Rejection rate > 50% | ✅ **Hit** — 93.6% | The one I marked "soft" is the one that held |
+| P6 | Clustering 2–3.5×, same collapse shape | ❌ **Half** — 1.48× peak, then **negative** (0.50× at 4 workers); shape ✅ unchanged (0.00% errors throughout) | Expected sub-linear CPU scaling; got **memory** exhaustion. Workers are bounded by heap, not cores |
 | P1 | 2203 is not a lock-timeout incident; near-zero 1205s | ⏳ pending 2203 | — |
 | P1-corollary | Fixing 2202's pool will *create* 1205s in 2203 | ⏳ pending 2203 | — |
 | P2 | 2204 OOMs at 2–3 concurrent exports; exit 137 | ⏳ pending 2204 | — |
+
+### The detector I proposed after one incident was falsified by the next
+
+This is the observability result of the lab, and it is a result *about
+monitoring*, not a walked-back recommendation.
+
+After OPS-2201 I nominated **`nodejs_eventloop_lag_p99_seconds`** as the
+detector for this failure class. It looked well-founded: the event loop was
+demonstrably the saturated resource, and the metric moved (29 ms mean, 45 ms
+p99, against ~12 ms idle). One incident, one confirmation.
+
+**OPS-2202 killed it.** Same root cause — a saturated single JS thread — and the
+metric stayed at **10 ms mean / 12–14 ms p99, indistinguishable from idle**,
+through a 36× brownout.
+
+The reason is a property of what the metric measures, and it is not subtle once
+seen. `prom-client` samples the scheduling delay of a timer: **per-turn delay,
+not queue depth.**
+
+| | OPS-2201 | OPS-2202 |
+|---|---|---|
+| Cost per request on the JS thread | **28.9 ms** | **0.295 ms** |
+| Requests queued behind you | ~200 | **~2,000** |
+| Event-loop lag observed | 29 ms mean / 45 ms p99 ✅ moved | **10 ms / 12–14 ms ❌ flat** |
+
+OPS-2201's 29 ms callbacks delay the next timer by ~29 ms, so lag tracks the
+problem *incidentally* — it is measuring **callback duration**, which happened to
+correlate. OPS-2202's callbacks are 0.3 ms each, so every turn completes
+promptly and lag reports a healthy loop **while 2,000 requests wait**. A
+saturated event loop serving many cheap callbacks shows **low lag**.
+
+> **Generalization: event-loop lag detects slow callbacks, not deep queues.** It
+> is a *latency-of-the-loop* metric being asked to serve as a *saturation*
+> metric, and the two diverge exactly when work is finely divided. Any detector
+> validated on a single incident is a detector validated on a single point.
+
+### What actually would have caught both — now tested against two incidents, not one
+
+The bar I failed to clear last time: a detector must survive **every** incident
+observed so far, not the one that inspired it. Across OPS-2201 and OPS-2202, all
+of these were **blind**:
+
+| Signal | OPS-2201 | OPS-2202 | Verdict |
+|---|---|---|---|
+| Error rate / `http_requests_total{5xx}` | 0.00% | 0.00% | ❌ blind twice |
+| `db_errors_total` | never incremented | series never created | ❌ blind twice |
+| DB CPU / pool utilization | 68–74% CPU, 30% pool | 21% CPU, 9% pool | ❌ looks *healthy* |
+| k6's shipped `http_req_failed` gate | passed | **passed** | ❌ passed through both brownouts |
+| `nodejs_eventloop_lag_p99` | 45 ms (moved) | 12–14 ms (flat) | ❌ 1 of 2 |
+
+**What moved in both cases was queue depth**, because in both cases the failure
+*was* a queue:
+
+| Signal | OPS-2201 | OPS-2202 | Verdict |
+|---|---|---|---|
+| **`http_requests_in_flight`** (added in this commit) | ~200 (= all VUs) | **2,005** | ✅ direct read on the queue |
+| **`nodejs_active_handles{type="Socket"}`** | elevated | **2,005** | ✅ same signal, no code change needed |
+| **p95 latency per route, ALL routes** | 7.04 s | 696 ms | ✅ 350× and 36× |
+| **Little's Law residual** `W_measured / (L/λ)` | 5.32 s vs 5.79 s | 0.536 s vs 0.590 s | ✅ both ~10% |
+
+> **The detector, stated as an alert and tested against two incidents:**
+>
+> 1. **`http_requests_in_flight > 2 × steady-state` for 1 minute** — the primary.
+>    Queue depth is the thing that is actually wrong in both incidents; every
+>    other symptom is downstream of it. Baseline steady state here is < 1.
+> 2. **p95 latency SLO applied across every route, not the complained-about
+>    one** — the backstop. It caught both (350×, 36×) and, critically, it is what
+>    reveals blast radius: in OPS-2201 the *uninstrumented bystander*
+>    `/api/patients/recent` degraded 1,400× while search was the only endpoint
+>    anyone filed a ticket about.
+> 3. **Response bytes per request** (`data_received / http_reqs`) — the leading
+>    indicator. Payload grows silently with the data set and pages nobody until
+>    it crosses a CPU ceiling.
+>
+> **Tested against 2 of 2 incidents. Still not proven** — two points is two
+> points, and OPS-2203 (row-lock serialization) and OPS-2204 (memory exhaustion)
+> are different resource classes that may well falsify #1 the way OPS-2202
+> falsified event-loop lag. **A row-lock stall may show low in-flight counts and
+> a memory failure may kill the process before any gauge is scraped.** Both will
+> be checked explicitly, and this table updated, rather than assumed to hold.
 
 **The generalizable lesson, from OPS-2201's three-in-a-row:**
 

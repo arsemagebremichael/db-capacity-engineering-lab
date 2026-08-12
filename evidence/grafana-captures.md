@@ -63,6 +63,36 @@ every measurement in this file's windows permanently.** Since the evidence
 fragile half. Shoot them before any teardown, and avoid `docker compose down`
 for the remainder of the lab.
 
+### Durability rule for the rest of the lab
+
+The asymmetry is the whole point: **`evidence/` is the only durable copy of
+anything Prometheus-derived.** The k6 summaries, `EXPLAIN` plans, `docker stats`
+captures and INNODB dumps are plain files, committed to git, and survive
+anything. The metrics history behind every Grafana panel is not — it is
+unreplicated container-local state.
+
+That asymmetry gets sharper from here, because **the remaining incidents
+deliberately provoke container instability**:
+
+- **OPS-2203** drives 500 concurrent writers at one row; the API may be
+  restarted between fix attempts.
+- **OPS-2204** is *designed* to OOM-kill the API repeatedly (P2 predicts exit
+  137 and a climbing `RestartCount`). Diagnosing it may well involve rebuilding
+  the API image to change how the export streams.
+
+Restarting `capacity-api` is safe for Prometheus history — different container.
+But a rebuild that tempts a `docker compose down`, or a `down -v` to reset the
+data set, takes the metrics with it.
+
+> **Practical rule: shoot each incident's panels before starting the next one.**
+> Not because the data expires — it doesn't — but because the next two incidents
+> are spent provoking exactly the kind of instability that ends in someone
+> typing `docker compose down`.
+
+If a full teardown does become unavoidable, say so first and the affected
+windows get marked **NOT MEASURED** in the journal rather than quietly
+disappearing.
+
 **The one shot that tells the whole story:** panel 1 (Throughput) over the FULL
 span `1786506075` → `1786507615` (03:41:15 → 04:06:55 UTC, ~26 min). On a
 **logarithmic y-axis** it shows every phase in one image: three flat plateaus at
@@ -109,14 +139,49 @@ Expect CPU pinned at ~1.48 cores through the 34 req/s and 52 req/s phases —
 **the same CPU ceiling at both throughputs**, which is the visual proof that the
 constraint never moved.
 
-## OPS-2202 — app freezes during surge, DB idle
+## OPS-2202 — app freezes during surge, DB idle ✅ READY TO SHOOT
 
-| Save as | Panel | Window (UTC) | What it should show |
+Windows recovered from Prometheus, same method as OPS-2201.
+
+| Save as | Panel | Window (unix) | What it should show |
 |---|---|---|---|
-| ⏳ `OPS-2202/grafana-throughput-before.png` | 1 — Throughput by route | TBD | Throughput plateau that does **not** rise as VUs ramp 0→2000. A flat line under rising offered load is the signature of a fixed-size resource. |
-| ⏳ `OPS-2202/grafana-p95-before.png` | 2 — p95 latency by route | TBD | p95 climbing roughly linearly with offered load while throughput stays flat — queueing, not slow work. |
-| ⏳ `OPS-2202/grafana-errors-before.png` | 4 — DB errors by code | TBD | Whether errors are DB-sourced at all. An *empty* panel here is itself a finding: it would mean requests died in the app tier, not the database. |
-| ⏳ `OPS-2202/grafana-throughput-after.png` | 1 — Throughput by route | TBD (post-fix) | Same axes as before. |
+| `OPS-2202/grafana-throughput-before.png` | 1 — Throughput | `1786508482` → `1786508512` | Flat ~3,400 req/s plateau that does **not** rise as VUs ramp 0→2000. A flat line under rising offered load is the signature of a fixed-size resource. |
+| `OPS-2202/grafana-p95-before.png` | 2 — p95 latency | `1786508482` → `1786508512` | p95 ~696 ms against the 19 ms baseline band, while throughput stays flat — queueing, not slow work. |
+| `OPS-2202/grafana-errors-before.png` | 4 — DB errors by code | `1786508482` → `1786508512` | **An EMPTY panel, and that is the finding.** `db_errors_total` never created a series. The DB is not involved in the failure at all. |
+| `OPS-2202/grafana-poolAB.png` | 1 — Throughput | `1786511092` → `1786511272` | The pool A/B: four alternating runs, pool 2 / 25 / 2 / 25, **all the same height**. P3a made visible. |
+| **`OPS-2202/grafana-admission-control.png`** | 1 — Throughput, **stacked by `status_code`** | `1786510612` → `1786510792` | **The money shot.** Total ~10,000 req/s of which ~93% is a 503 band and a thin ~600 req/s band of 200s. Overload made *visible* — the whole argument for admission control in one image. |
+| `OPS-2202/grafana-inflight-sweep.png` | Add panel: `http_requests_in_flight` | `1786510312` → `1786511062` | The gauge pinned flat at each successive `MAX_INFLIGHT` (8/16/32/64/256/1024/4096) — the limiter provably doing its job. |
+| **`OPS-2202/grafana-clustering-memory.png`** | 3 — Memory vs limit | `1786511512` → `1786511677` | **The forward reference to OPS-2204.** RSS climbing 77 → 120 → 154 → 159 MiB against the 160 MiB cap as WORKERS goes 1→4, with throughput *falling* after 2. Memory, not CPU, is the container's real limit. |
+
+Phase → window reference (all unix, from Prometheus):
+
+```
+1786508482 -> 1786508512   OPS-2202 reproduce (before)        peak  3,412 rps
+1786508812 -> 1786508887   fix 1, pool raise verification     peak  3,667 rps
+1786508962 -> 1786509142   INVALID pool A/B (env never applied — see journal)
+1786509202 -> 1786509292   admission control N=64             peak 10,305 rps
+1786510312 -> 1786510447   INVALID MAX_INFLIGHT sweep (env never applied)
+1786510612 -> 1786510792   MAX_INFLIGHT sweep, REDONE valid   peak 10,828 rps
+1786510942 -> 1786511062   MAX_INFLIGHT sweep N=8/16/32       peak 11,412 rps
+1786511092 -> 1786511272   pool A/B, REDONE valid             peak  3,484 rps
+1786511512 -> 1786511677   clustering WORKERS=1/2/3/4         peak  2,715 rps
+```
+
+Two of those windows are **invalidated experiments** and are labelled so
+deliberately. If they are ever shot, caption them as the broken runs — they look
+like clean results, which is exactly the problem (see LAB_JOURNAL.md, OPS-2202,
+"A methodology error that invalidated two experiments").
+
+**Also worth one Prometheus shot** — the falsified detector, which is a result in
+its own right:
+
+```promql
+nodejs_eventloop_lag_p99_seconds
+```
+over `1786506185` → `1786508512` (spanning OPS-2201 **and** OPS-2202). Expect it
+elevated during 2201 (~45 ms) and **flat at ~12–14 ms during 2202's 36× brownout**
+— one metric, two identical root causes, one detection and one miss. Save as
+`OPS-2202/prom-eventloop-lag-falsified.png`.
 
 ## OPS-2203 — bed admissions fail under load
 

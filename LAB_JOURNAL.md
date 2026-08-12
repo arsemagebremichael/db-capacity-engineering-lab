@@ -1545,15 +1545,222 @@ be the bottleneck. The corollary for capacity work is practical:
   just whether the numbers improved. "It got faster" does not tell you what to
   fix next; "CPU is still pinned while the pool sits at 15.7%" does.
 
-> Rank the four incidents by **blast radius** (threat to overall availability at
-> scale), justified with your measured numbers:
-> 1. ____________________________________________________________________
-> 2. ____________________________________________________________________
-> 3. ____________________________________________________________________
-> 4. ____________________________________________________________________
->
-> If you could ship only **one** fix before a launch, which and why?
-> ____________________________________________________________________________
->
-> For each incident, what alert or dashboard would have caught it in production
-> *before* a user filed a ticket? ____________________________________________
+### The through-line: three correct fixes aimed at resources that were not the constraint
+
+Across two incidents I shipped **three changes that were each defensible, each
+verifiably improved the thing they targeted, and each moved user-visible
+throughput by approximately nothing**:
+
+| Fix | What it genuinely improved | Effect on throughput |
+|---|---|---|
+| OPS-2201 index on `patients(last_name)` | rows examined 100,000 → 10,000 (10:1 → 1:1); MySQL 20.25 → 8.1 ms, **2.5× faster** | 34.09 → 34.64 req/s, **+1.6%** (inside variance) |
+| OPS-2202 pool `connectionLimit` 2 → 25 | pool ceiling 37,665 → ~470,000 req/s | 3,412 → 3,447 req/s, **+1.0%** |
+| OPS-2202 clustering (3–4 workers) | 3–4× the theoretical JS-thread capacity | **0.73× and 0.50×** — actively worse |
+
+All three targeted a **non-binding** ceiling. In every case the binding
+constraint was CPU on Node's single JS thread, and it stayed the binding
+constraint throughout. The sharpest demonstration is OPS-2201 step C: the
+event-loop ceiling rose **125×** (34.5 → 4,247 req/s) and **the constrained
+resource never changed** — `capacity-api` still held ~143% CPU while the
+connection pool sat at 15.7% utilization.
+
+> **The lesson, stated for reuse: fixing the binding constraint does not
+> necessarily move the constraint, and a large improvement is not evidence that
+> it moved.** A bottleneck can be relieved by two orders of magnitude and still
+> be the bottleneck. The only way to know is to re-measure *what is saturated*
+> after each fix — not whether the numbers got better.
+
+The corollary is that "the obvious fix" and "the fix that works" are answers to
+different questions. **The 124.6× in OPS-2201 came from changing what the
+application ships — 3.47 MiB → 7.4 KiB per response — not from the index the
+ticket implied.**
+
+### Blast radius — ranked. The shared ceiling is memory, not CPU
+
+The four incidents contend for **three** resources, but only one of them is
+shared by all four and hard-capped: the **160 MB container**. CPU can be
+oversubscribed; a cgroup memory limit cannot — crossing it is a `SIGKILL`.
+
+Measured memory pressure, from evidence gathered for *other* purposes:
+
+| Condition | Peak RSS | % of 160 MiB cap |
+|---|---:|---:|
+| Baseline (50 VUs, `/recent`) | 98.6 MiB | 62% |
+| **OPS-2201 search load alone, pre-fix** | **148.7 MiB** | **93%** |
+| OPS-2202 clustering, 3 workers | 154.2 MiB | 96% |
+| OPS-2202 clustering, 4 workers | 159.3 MiB | **99.6%** |
+| OPS-2201 after fixes | 46.5 MiB | 29% |
+| One export payload (measured, 1 VU) | +34.47 MiB | +21.5% **each** |
+
+**Ranking by blast radius (threat to overall availability at scale):**
+
+1. **OPS-2204 — nightly export (NOT INVESTIGATED, ranked on measured adjacent
+   evidence).** Ranked first despite not being worked, because it is the only
+   incident whose failure mode is **process death**, and it draws on the
+   resource with **zero elasticity**. A measured 34.47 MiB per concurrent caller
+   against a 160 MB cap, where ordinary daytime search traffic already reached
+   93%, leaves roughly **11 MiB of true headroom** when a search burst overlaps
+   the batch window. Every other incident degrades; this one kills the process
+   and takes every in-flight request with it. **This ranking is an inference
+   from adjacent measurements, not from reproducing OPS-2204.**
+2. **OPS-2201 — search.** Measured **service-wide** blast radius, not
+   endpoint-local: the untouched bystander `/api/patients/recent` degraded
+   **1,400×** (0.004 s → 5.78 s) at HTTP 200. It also drove RSS to 93% of cap,
+   making it a *contributing cause* of #1. Ranked above 2202 because its
+   per-request cost (28.9 ms) is ~98× larger, so it saturates at a far lower
+   request rate — 34.5 req/s versus 3,391.
+3. **OPS-2202 — registration surge.** Same mechanism as #2, same service-wide
+   scope, but needs ~100× the traffic to reach the same place (3,391 req/s
+   ceiling). Recovers instantly when load drops, and memory stayed flat at
+   96.6 MiB — no lasting damage.
+4. **OPS-2203 — admissions (NOT INVESTIGATED).** Ranked last on the strength of
+   one measured number: `W = 508.86 ms` at 1 VU. Row-lock serialization is
+   **bounded in scope** — it should throttle admissions to one hospital row
+   without consuming a resource other endpoints need, *provided* the connection
+   pool is large enough that blocked admits don't starve reads. That proviso is
+   exactly what the old pool of 2 violated, and it is untested.
+
+**Note the ranking is not the order I worked them, and not the ticket priority
+order** (2202 and 2203 are P1; 2201 and 2204 are P2). The two P2s rank 1st and
+2nd by measured blast radius.
+
+### If I could ship only ONE fix before a launch
+
+**Ship OPS-2201's pagination — `LIMIT 50` on search** (commit `3147fc6`).
+
+The arithmetic, all measured:
+
+```
+Throughput      34.09 -> 4,247 req/s        124.6x
+p95             6.72-7.04 s -> 52.67-58.59 ms
+Peak RSS        148.7 MiB (93%) -> 46.5 MiB (29%)   frees 102 MiB
+Payload         3.47 MiB -> 7.4 KiB         477x
+Bystander       5.78 s -> 0.045 s           128x  (endpoint I did not touch)
+```
+
+It wins on three independent counts, and the third is the decisive one:
+
+1. **Largest measured improvement in the lab**, by two orders of magnitude.
+2. **Only fix that repaired an endpoint it did not modify** — the bystander
+   recovery is proof it removed a *shared-resource* starvation, not a local one.
+3. **It is also the largest available mitigation for the incident I ranked #1
+   for blast radius.** Freeing 102 MiB against a 160 MB cap roughly **triples**
+   the headroom available to the export, without touching the export. Nothing
+   else on the list buys memory: the index costs a B-tree, the pool raise is
+   neutral, clustering *consumes* 40+ MiB per worker.
+
+Runner-up, and why it loses: **admission control** is the only change that makes
+overload *visible* to existing alerting (0.00% → 93.6% error rate), and I'd ship
+it second. But it costs **82% of throughput** under a non-backing-off client and
+raises no ceiling. Before a launch, the fix that removes the problem beats the
+fix that reports it.
+
+### Detector — what would have caught these before a ticket was filed
+
+Per incident, and then the general rule:
+
+| Incident | What was blind | What would have caught it |
+|---|---|---|
+| **OPS-2201** | error rate (0.00%), `db_errors_total` (never incremented), DB health (MySQL 68–74% CPU, 65% pool idle — genuinely green) | **p95 across ALL routes.** The bystander `/recent` degraded 1,400× and generated no ticket. Also `http_requests_in_flight` ≈ 200. |
+| **OPS-2202** | error rate (0.00%, 0 of 103,760), `db_errors_total` (series never created), DB health (21% CPU, 9% pool), **the incident's own shipped `http_req_failed` gate — it PASSED**, and `nodejs_eventloop_lag_p99` (10–14 ms, flat) | **`http_requests_in_flight` = 2,005** against a steady state of <1. Also per-route p95 (36×). |
+| **OPS-2203** | NOT INVESTIGATED | untested |
+| **OPS-2204** | NOT INVESTIGATED | untested |
+
+> **The proposed detector:**
+> 1. **`http_requests_in_flight > 2 × steady-state`, 1 min** — primary. Queue
+>    depth is what was actually wrong in both incidents; everything else is
+>    downstream. Metric added in the OPS-2202 admission-control commit.
+> 2. **p95 SLO per route, applied to every route** — backstop, and the only
+>    thing that reveals blast radius.
+> 3. **Response bytes per request** (`data_received / http_reqs`) — leading
+>    indicator. Payload grows silently with the data set and pages nobody until
+>    it crosses a CPU ceiling.
+
+**Tested against 2 incidents of 2. Two points is two points.** I am stating that
+plainly because I already made the opposite mistake once: after OPS-2201 I
+nominated `nodejs_eventloop_lag_p99` on the strength of a single confirmation,
+and OPS-2202 falsified it — same root cause, metric flat through a 36× brownout,
+because it samples **per-turn delay, not queue depth**.
+
+**Named falsifiers, untested:**
+- **OPS-2203 (row-lock stall)** could falsify #1. If admits serialize on a row
+  lock while the pool absorbs the waiters, in-flight count may stay *low* while
+  throughput collapses to ~2/s. A saturation metric that reads the app-tier queue
+  cannot see a queue that formed inside InnoDB.
+- **OPS-2204 (memory kill)** could falsify all three. A `SIGKILL` from the cgroup
+  OOM killer can land **between 5-second Prometheus scrapes**, so the gauge may
+  never record the excursion that killed the process. Detection there probably
+  requires `container_memory_working_set_bytes` from cAdvisor plus restart-count
+  alerting — neither of which is wired up in this stack.
+
+### Experimental hygiene — two treatment-delivery failures
+
+Both experiments below returned clean, plausible-looking tables while measuring
+something other than what I thought. Neither was caught by inspecting results.
+
+1. **The instrument contended with the subject.** Sampling `/metrics` once per
+   second from the harness to capture peak heap inflated the tail: **p99 296 ms
+   and p95 20–50 ms**, versus **16–17 ms p95** in otherwise identical unsampled
+   runs. Throughput was unaffected, which is what made it insidious — it looked
+   like a real tail-latency finding in a *healthy* system, and would have
+   contaminated the baseline every later comparison was made against. Fixed by
+   reading Prometheus's existing 5 s scrape (`max_over_time`), which the system
+   already pays for.
+2. **The treatment never reached the patient.** `VAR=x docker compose up` does
+   not inject env into a container unless the compose file declares it, so a pool
+   A/B and a complete `MAX_INFLIGHT` sweep silently ran **every arm at the
+   default**. Caught only by an arithmetic impossibility: `MAX_INFLIGHT=4096`
+   reported shedding **93.5% of 2,000 offered VUs**, and a limit above the
+   offered concurrency can reject nothing.
+
+> **Rule: verify the treatment landed before trusting any arm of an experiment.**
+> Confirm the independent variable actually changed — `docker compose exec env`,
+> a config echo, a metric — *before* reading the dependent variable. Had the
+> broken sweep produced merely plausible numbers instead of impossible ones, I
+> would have published the right conclusion ("the pool raise is a no-op") from a
+> test where both arms were identical. **Reaching a correct conclusion through a
+> broken experiment is worse than being wrong**, because nothing ever prompts a
+> recheck.
+
+**Where this risk does not apply:** OPS-2201's three fixes were **committed code
+changes deployed by image rebuild**, so treatment delivery is verified by
+construction — the code either ran or the container didn't start. The
+vulnerability was specific to runtime-parameterized experiments. Worth noting
+because it suggests a preference: **when an experiment can be run as a code
+change rather than a runtime knob, the code change is the more trustworthy
+instrument**, even though the knob is faster.
+
+### Prediction scorecard — 4 hits, 6 misses of 10 registered
+
+Every prediction was written down **before** its measurement. The misses are
+listed with equal prominence because they were more productive than the hits.
+
+| # | Prediction | Outcome | What the miss named |
+|---|---|---|---|
+| 2201-A | Index won't change throughput (~34.5) | ✅ **Hit** — 34.64 | — |
+| 2201-B | Projection → 65–75 req/s | ❌ Missed high — 51.13 | A **per-row** term (1.21 µs/row) that dropping columns cannot touch |
+| 2201-C | Constraint leaves the event loop; several hundred req/s | ❌ Wrong on mechanism — 4,247, still event-loop bound | A **fixed per-request** term (0.139 ms); and that a 125× ceiling rise need not move the constraint |
+| P3a | Pool raise won't change throughput (3,391 ±5%) | ✅ **Hit** — +1.0%; search −0.1% | — |
+| P3b | `limit=200` → ~1,120 req/s | ❌ Missed — 2,084 | I applied a realization factor to a model **already fitted on achieved throughputs**, double-counting host contention. Corrected model: **1,905 vs 2,084, +9.4% out-of-sample** |
+| P4 | 2202's pool is not the constraint; ~3,510 | ✅ **Hit** — 3,391.6 (−3.4%); pool 9.0% vs 9.3% | — |
+| P4-err | Errors from the TCP accept backlog | ❌ Wrong — 0.00% errors, 2,005 sockets accepted cleanly | Right that the ticket's error story was wrong; wrong about the replacement |
+| P5a/b | Admitted p95 15–40 ms; throughput 2,000–3,300 | ❌ Both missed — 242 ms, 452 req/s | Rejection costs **0.089 ms of the same thread**; a non-backing-off client makes shedding self-defeating (**86%** of budget spent rejecting) |
+| P5c | Rejection rate > 50% | ✅ **Hit** — 93.6% | The one flagged "soft" is the one that held |
+| P6 | Clustering 2–3.5×, same collapse shape | ❌ Half — **1.48×** peak then **negative**; shape ✅ unchanged | Expected sub-linear **CPU** scaling; got **memory** exhaustion. Workers bounded by heap, not cores |
+
+**Why pre-registration was worth the overhead.** A 40% hit rate looks poor until
+you compare it to the alternative. Each miss above resolved into **a specific,
+nameable missing term** — a per-row cost, a fixed per-request cost, a rejection
+cost, a memory bound — because the prediction was specific enough to fail in a
+particular direction. Written *after* the fact, every one of those results would
+have been equally explainable and would have taught me nothing.
+
+> **Pre-registration converts a wrong answer into a named missing term.** That is
+> its whole value, and it is why the misses are the most useful rows in this
+> table.
+
+The failure mode it does **not** protect against is visible in P3b: the model was
+right and my *arithmetic around it* was wrong. Pre-registration catches bad
+models. It does not catch bad derivations — only checking the units and the
+sanity of intermediate values does, which is the same discipline that caught a
+negative service time in OPS-2201.

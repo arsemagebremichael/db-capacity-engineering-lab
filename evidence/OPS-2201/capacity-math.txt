@@ -1,0 +1,57 @@
+===============================================================================
+OPS-2201 — capacity arithmetic. Does the model predict the measurement?
+===============================================================================
+
+MEASURED INPUTS
+  observed throughput          34.55 req/s
+  API process CPU              1.48 cores (JS main thread pinned at 1.0)
+  MySQL time per search        20.25 ms  (perf_schema, 3679 execs, warm)
+  pool size                    2
+  offered concurrency          200 VUs
+  payload per response         3.47 MiB (10,000 rows x 363.6 B)
+
+CEILING 1 — MySQL connection pool:  pool / W_db
+  2 / 0.02025s = 98.8 req/s
+
+CEILING 2 — single JS thread:  1 thread / CPU-per-request
+  JS main thread is saturated at 1.0 core while serving 34.55 req/s
+  => JS CPU per request = 1.0 / 34.55 = 28.9 ms
+  => ceiling = 1 / 0.0289s = 34.5 req/s
+
+WHICH BINDS?  min(98.8, 34.5) = 34.5 req/s
+  OBSERVED:                              34.55 req/s
+  The event loop binds. The pool has 65% headroom unused.
+
+CROSS-CHECK — Little's Law on the queue, L = lambda*W
+  W = L/lambda = 200/34.55 = 5.79 s   (predicted mean latency)
+  k6 measured avg latency = 5.32 s        -> model error 8.8%
+
+CROSS-CHECK — why did the trivial /recent probe take ~5.6s?
+  A request arriving during the storm queues behind ~200 in-flight requests,
+  each needing 28.9 ms of the one JS thread:
+  200 x 28.9 ms = 5.79 s predicted
+  MEASURED: 5.590 / 5.804 / 5.783 s      -> model error 1.0%
+
+WHAT AN INDEX ALONE WOULD BUY
+  An index cuts rows EXAMINED 100,000 -> 10,000. It cannot cut rows
+  RETURNED: 10,000 rows match 'Smith' either way (10 distinct last names,
+  10,000 rows each -> 10% selectivity).
+  Post-index MySQL time is NOT estimated here: the only figures available
+  are a cold EXPLAIN ANALYZE (27.3 ms scan) and a warm under-load average
+  (20.25 ms). Subtracting one from the other is invalid -- it yields a
+  negative service time. Post-index W_db is MEASURED after the change.
+  What can be stated without measuring: the JS thread still materializes
+  10,000 row objects and JSON.stringify's 3.47 MiB per request, so the
+  event-loop cost of 28.9 ms/req is untouched by any index.
+  Since the event-loop ceiling (34.5 req/s) is already 3x LOWER than
+  the pool ceiling (98.8 req/s), lowering W_db moves a ceiling that is
+  not binding.
+  => PREDICTION: adding the index moves throughput by roughly NOTHING.
+     Falsifiable, and tested in 'Fix & verify' below.
+
+  FRAMING: the index is NOT useless -- it is NOT YET BINDING. It lowers a real
+  ceiling (98.8 req/s) that is not today's constraint. That is correct work
+  which buys headroom; it just cannot show up in a throughput measurement while
+  a lower ceiling exists. The model is scored by naming, IN ADVANCE, where the
+  constraint moves after each fix -- see 'constraint ladder' below.
+===============================================================================

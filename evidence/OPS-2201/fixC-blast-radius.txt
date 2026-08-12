@@ -1,0 +1,11 @@
+OPS-2201 — BLAST RADIUS RE-TEST after all three fixes
+Probing /api/patients/recent during the 200-VU search load.
+BEFORE the fixes this probe measured 5.590 / 5.804 / 5.783 s (idle: 0.004 s).
+Captured: 2026-08-12T04:06:12Z UTC
+
+  probe 1: /api/patients/recent http=200 time_total=0.047260s
+  probe 2: /api/patients/recent http=200 time_total=0.048040s
+  probe 3: /api/patients/recent http=200 time_total=0.045655s
+  probe 4: /api/patients/recent http=200 time_total=0.043752s
+  probe 5: /api/patients/recent http=200 time_total=0.044315s
+  idle: time_total=0.003055s

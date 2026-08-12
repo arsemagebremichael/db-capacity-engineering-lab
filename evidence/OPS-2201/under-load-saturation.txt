@@ -1,0 +1,42 @@
+===============================================================================
+OPS-2201 — WHICH RESOURCE IS SATURATED? (during 200-VU search load)
+docker stats + concurrent /api/patients/recent probe (tests the reporter's claim
+that the 'recent patients' panel stays fast while search is dying)
+Captured: 2026-08-12T03:44:38Z UTC
+===============================================================================
+--- t=2s  unix=1786506278 ---
+capacity-api: CPU=148.87% MEM=109.5MiB / 160MiB (68.44%)
+mysql-db: CPU=68.31% MEM=506.3MiB / 7.75GiB (6.38%)
+  PROBE /api/patients/recent -> http=200 time_total=5.590067s
+--- t=4s  unix=1786506286 ---
+capacity-api: CPU=149.01% MEM=88.06MiB / 160MiB (55.04%)
+mysql-db: CPU=71.67% MEM=505.6MiB / 7.75GiB (6.37%)
+  PROBE /api/patients/recent -> http=200 time_total=5.803638s
+--- t=6s  unix=1786506294 ---
+capacity-api: CPU=153.13% MEM=86.11MiB / 160MiB (53.82%)
+mysql-db: CPU=74.39% MEM=506.3MiB / 7.75GiB (6.38%)
+  PROBE /api/patients/recent -> http=200 time_total=5.783454s
+--- t=8s  unix=1786506303 ---
+capacity-api: CPU=150.97% MEM=85.61MiB / 160MiB (53.51%)
+mysql-db: CPU=71.90% MEM=505.7MiB / 7.75GiB (6.37%)
+  PROBE /api/patients/recent -> http=200 time_total=3.525549s
+--- t=10s  unix=1786506310 ---
+capacity-api: CPU=0.28% MEM=79.43MiB / 160MiB (49.64%)
+mysql-db: CPU=0.48% MEM=502.3MiB / 7.75GiB (6.33%)
+  PROBE /api/patients/recent -> http=200 time_total=0.004277s
+--- t=12s  unix=1786506312 ---
+capacity-api: CPU=0.99% MEM=79.42MiB / 160MiB (49.64%)
+mysql-db: CPU=0.51% MEM=502.6MiB / 7.75GiB (6.33%)
+  PROBE /api/patients/recent -> http=200 time_total=0.004152s
+--- t=14s  unix=1786506315 ---
+capacity-api: CPU=4.59% MEM=42.2MiB / 160MiB (26.38%)
+mysql-db: CPU=0.47% MEM=502.4MiB / 7.75GiB (6.33%)
+  PROBE /api/patients/recent -> http=200 time_total=0.003646s
+--- t=16s  unix=1786506318 ---
+capacity-api: CPU=0.32% MEM=40.26MiB / 160MiB (25.16%)
+mysql-db: CPU=0.41% MEM=502.3MiB / 7.75GiB (6.33%)
+  PROBE /api/patients/recent -> http=200 time_total=0.005079s
+--- t=18s  unix=1786506320 ---
+capacity-api: CPU=0.28% MEM=40.19MiB / 160MiB (25.12%)
+mysql-db: CPU=1.90% MEM=502.4MiB / 7.75GiB (6.33%)
+  PROBE /api/patients/recent -> http=200 time_total=0.004089s

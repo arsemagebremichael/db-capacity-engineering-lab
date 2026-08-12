@@ -1,0 +1,100 @@
+===============================================================================
+OPS-2201 — MySQL state DURING the 200-VU search load
+Captured: 2026-08-12T03:41:32Z UTC (~8s into a 30s run)
+===============================================================================
+
+########## SHOW FULL PROCESSLIST ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Id	User	Host	db	Command	Time	State	Info
+5	event_scheduler	localhost	NULL	Daemon	1488	Waiting on empty queue	NULL
+310	root	172.23.0.4:36068	capacity_lab	Sleep	0		NULL
+311	root	172.23.0.4:36070	capacity_lab	Sleep	0		NULL
+318	root	localhost	NULL	Query	0	init	SHOW FULL PROCESSLIST
+
+########## Threads_* / connection counters ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Variable_name	Value
+Threads_cached	0
+Threads_connected	3
+Threads_created	3
+Threads_running	3
+Variable_name	Value
+Max_used_connections	3
+Variable_name	Value
+Connections	319
+Variable_name	Value
+max_connections	151
+
+########## Handler counters (full-scan proof) ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Variable_name	Value
+Handler_read_rnd_next	0
+Variable_name	Value
+Handler_read_key	0
+Variable_name	Value
+Handler_read_first	0
+Variable_name	Value
+Select_scan	0
+Variable_name	Value
+Slow_queries	0
+
+########## CORRECTION: SHOW STATUS is SESSION-scoped; the zeros above are an
+########## artifact of my own fresh session. GLOBAL counters below are the real ones.
+########## SHOW GLOBAL STATUS — full-scan proof ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Variable_name	Value
+Handler_read_rnd_next	126106141
+Variable_name	Value
+Handler_read_key	116744
+Variable_name	Value
+Select_scan	14829
+Variable_name	Value
+Threads_running	2
+Variable_name	Value
+Max_used_connections	3
+Variable_name	Value
+Innodb_rows_read	126677095
+Variable_name	Value
+Bytes_sent	3929146132
+
+########## PROCESSLIST sampled 10x at 0.5s intervals (is MySQL ever busy?) ##########
+--- sample 1 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 2 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 3 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 4 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 5 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 6 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 7 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 8 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 9 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2
+--- sample 10 ---
+mysql: [Warning] Using a password on the command line interface can be insecure.
+app_conns	running_queries	idle_conns
+2	0	2

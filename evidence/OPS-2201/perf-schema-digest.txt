@@ -1,0 +1,28 @@
+===============================================================================
+OPS-2201 — performance_schema statement digest, aggregated over the load runs
+The rows-examined vs rows-sent ratio, measured across ~3700 real requests
+(not a single EXPLAIN). Captured: 2026-08-12T03:46:38Z UTC
+===============================================================================
+mysql: [Warning] Using a password on the command line interface can be insecure.
+*************************** 1. row ***************************
+                    query: SELECT * FROM `patients` WHERE `last_name` = ?
+                    execs: 3679
+      rows_examined_total: 367900000
+          rows_sent_total: 36790000
+        examined_per_exec: 100000
+            sent_per_exec: 10000
+examined_per_row_returned: 10.0
+                total_sec: 74.49
+                   avg_ms: 20.25
+      execs_with_no_index: 3679
+*************************** 2. row ***************************
+                    query: SELECT * FROM `patients` ORDER BY `id` DESC LIMIT ?
+                    execs: 9
+      rows_examined_total: 450
+          rows_sent_total: 450
+        examined_per_exec: 50
+            sent_per_exec: 50
+examined_per_row_returned: 1.0
+                total_sec: 0
+                   avg_ms: 0.31
+      execs_with_no_index: 0

@@ -1,0 +1,61 @@
+===============================================================================
+OPS-2201 — EXPLAIN / EXPLAIN ANALYZE, BEFORE fix (idle system)
+Query as issued by api/server.js:102 -> SELECT * FROM patients WHERE last_name = ?
+Captured: 2026-08-12T03:39:50Z UTC
+===============================================================================
+mysql: [Warning] Using a password on the command line interface can be insecure.
+
+===== EXPLAIN (classic) =====
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: patients
+   partitions: NULL
+         type: ALL
+possible_keys: NULL
+          key: NULL
+      key_len: NULL
+          ref: NULL
+         rows: 98191
+     filtered: 10.00
+        Extra: Using where
+
+===== EXPLAIN FORMAT=JSON =====
+*************************** 1. row ***************************
+EXPLAIN: {
+  "query_block": {
+    "select_id": 1,
+    "cost_info": {
+      "query_cost": "10276.10"
+    },
+    "table": {
+      "table_name": "patients",
+      "access_type": "ALL",
+      "rows_examined_per_scan": 98191,
+      "rows_produced_per_join": 9819,
+      "filtered": "10.00",
+      "cost_info": {
+        "read_cost": "9294.19",
+        "eval_cost": "981.91",
+        "prefix_cost": "10276.10",
+        "data_read_per_join": "19M"
+      },
+      "used_columns": [
+        "id",
+        "first_name",
+        "last_name",
+        "email",
+        "diagnosis",
+        "notes",
+        "created_at"
+      ],
+      "attached_condition": "(`capacity_lab`.`patients`.`last_name` = 'Smith')"
+    }
+  }
+}
+
+===== EXPLAIN ANALYZE (actual execution) =====
+*************************** 1. row ***************************
+EXPLAIN: -> Filter: (patients.last_name = 'Smith')  (cost=10276 rows=9819) (actual time=0.233..31.5 rows=10000 loops=1)
+    -> Table scan on patients  (cost=10276 rows=98191) (actual time=0.168..27.3 rows=100000 loops=1)
+

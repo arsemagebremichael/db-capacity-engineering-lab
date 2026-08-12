@@ -1,0 +1,28 @@
+OPS-2201 STEP C — where did the binding constraint move? (during load)
+Captured: 2026-08-12T04:04:36Z UTC
+
+--- sample 1 unix=1786507476 ---
+capacity-api: CPU=142.79% MEM=45.39MiB / 160MiB
+mysql-db: CPU=36.50% MEM=508.4MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+--- sample 2 unix=1786507480 ---
+capacity-api: CPU=143.83% MEM=45.85MiB / 160MiB
+mysql-db: CPU=36.56% MEM=508.1MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+--- sample 3 unix=1786507484 ---
+capacity-api: CPU=144.79% MEM=46.48MiB / 160MiB
+mysql-db: CPU=36.60% MEM=508.4MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+--- sample 4 unix=1786507488 ---
+capacity-api: CPU=143.67% MEM=46.34MiB / 160MiB
+mysql-db: CPU=38.42% MEM=508.4MiB / 7.75GiB
+mysql: [Warning] Using a password on the command line interface can be insecure.
+  mysql: app_conns=2 running=0 sleeping=2
+
+########## perf_schema: search digest under paginated load ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+execs	examined_per_exec	sent_per_exec	avg_ms
+514268	50	50	0.074

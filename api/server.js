@@ -23,6 +23,11 @@ app.use(express.json());
 
 const PORT = Number(process.env.PORT || 3000);
 
+// Search result paging. A search UI renders a page at a time; returning every
+// match is what let one query occupy the single JS thread for ~29ms.
+const DEFAULT_PAGE_SIZE = Number(process.env.SEARCH_PAGE_SIZE || 50);
+const MAX_PAGE_SIZE = Number(process.env.SEARCH_MAX_PAGE_SIZE || 200);
+
 // ---------------------------------------------------------------------------
 // Prometheus metrics
 // ---------------------------------------------------------------------------
@@ -105,11 +110,18 @@ app.get('/api/patients/search', async (req, res) => {
     // 3.47 MiB, which the single JS thread then had to JSON.stringify.
     // /api/patients/export is a separate handler with its own SQL (see below),
     // so the analytics extract is unaffected by this projection.
+    // Bound the number of rows a single search can return. 'Smith' matches
+    // 10,000 of 100,000 patients (10 distinct last names in this data set), and
+    // materializing all of them cost ~1.23 us/row on the single JS thread
+    // regardless of how few columns we select. Row count, not column width, is
+    // the remaining term in the serialization cost.
+    const limit = Math.min(Number(req.query.limit) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
     const [rows] = await pool.query(
-      'SELECT id, first_name, last_name, email, diagnosis, created_at FROM patients WHERE last_name = ?',
-      [lastName]
+      'SELECT id, first_name, last_name, email, diagnosis, created_at FROM patients WHERE last_name = ? ORDER BY id LIMIT ? OFFSET ?',
+      [lastName, limit, offset]
     );
-    res.json({ count: rows.length, lastName, data: rows });
+    res.json({ count: rows.length, lastName, limit, offset, data: rows });
   } catch (err) {
     dbErrorsTotal.inc({ route: '/api/patients/search', code: err.code || 'UNKNOWN' });
     res.status(500).json({ error: err.code || 'ERROR', message: err.message });

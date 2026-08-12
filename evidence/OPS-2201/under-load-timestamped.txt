@@ -1,0 +1,29 @@
+===============================================================================
+OPS-2201 — MySQL sampled 1/s DURING the 200-VU search load, WITH timestamps
+Each sample runs INSIDE the mysql container (no docker-exec overhead per sample)
+so the cadence is real. Cross-check the unix times against the k6 run window.
+Sampling started: 2026-08-12T03:43:19Z UTC (unix 1786506199)
+===============================================================================
+unix=1786506199 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=201546177
+unix=1786506200 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=204877139
+unix=1786506201 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=208077143
+unix=1786506202 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=211315843
+unix=1786506203 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=214877151
+unix=1786506204 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=218373101
+unix=1786506205 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=221888602
+unix=1786506206 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=225477163
+unix=1786506207 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=228923472
+unix=1786506208 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=232460879
+unix=1786506209 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=235877175
+unix=1786506210 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=239112847
+unix=1786506211 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=242589936
+unix=1786506212 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=246077187
+unix=1786506213 app_conns=2 running=1 sleeping=1 threads_running=3 innodb_rows_read=249610688
+unix=1786506214 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=250277195
+unix=1786506215 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=250277199
+unix=1786506216 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=250277203
+unix=1786506217 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=250277207
+unix=1786506218 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=250277211
+unix=1786506219 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=250277215
+unix=1786506220 app_conns=2 running=0 sleeping=2 threads_running=2 innodb_rows_read=250277219
+sampling ended unix: 1786506221

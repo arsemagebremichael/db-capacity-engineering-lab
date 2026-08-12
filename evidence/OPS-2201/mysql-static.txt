@@ -1,0 +1,56 @@
+===============================================================================
+OPS-2201 — static schema & query-plan evidence (IDLE system, before load)
+Captured: 2026-08-12T03:39:13Z UTC
+===============================================================================
+
+########## SHOW CREATE TABLE patients ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+*************************** 1. row ***************************
+       Table: patients
+Create Table: CREATE TABLE `patients` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `first_name` varchar(64) NOT NULL,
+  `last_name` varchar(64) NOT NULL,
+  `email` varchar(128) NOT NULL,
+  `diagnosis` varchar(255) NOT NULL,
+  `notes` text NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=131071 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+
+########## SHOW INDEX FROM patients ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+*************************** 1. row ***************************
+        Table: patients
+   Non_unique: 0
+     Key_name: PRIMARY
+ Seq_in_index: 1
+  Column_name: id
+    Collation: A
+  Cardinality: 98191
+     Sub_part: NULL
+       Packed: NULL
+         Null: 
+   Index_type: BTREE
+      Comment: 
+Index_comment: 
+      Visible: YES
+   Expression: NULL
+
+########## row counts / cardinality of last_name ##########
+mysql: [Warning] Using a password on the command line interface can be insecure.
+total_rows
+100000
+distinct_last_names
+10
+last_name	rows_matching
+Johnson	10000
+Williams	10000
+Brown	10000
+Jones	10000
+Garcia	10000
+Miller	10000
+Davis	10000
+Rodriguez	10000
+Martinez	10000
+Smith	10000

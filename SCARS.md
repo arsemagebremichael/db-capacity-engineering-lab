@@ -3,8 +3,15 @@
 Read this at 2am. Every number here was measured; raw output is in
 [`evidence/`](./evidence/). Full working in [`LAB_JOURNAL.md`](./LAB_JOURNAL.md).
 
-**Scope:** OPS-2201 and OPS-2202 were investigated and fixed. OPS-2203 and
-OPS-2204 were **not investigated** — see [Not investigated](#not-investigated).
+**Scope:** OPS-2201 and OPS-2202 were investigated and fixed. **OPS-2203 was
+touched only as a regression test of my own shipped work** (scar OPS-2202-R) —
+its root cause was not investigated. OPS-2204 was not worked at all. See
+[Not investigated](#not-investigated).
+
+> ⚠️ **Read scar OPS-2202-R first if you are deploying this.** It documents a
+> live regression introduced by a fix in this submission: `ER_LOCK_WAIT_TIMEOUT`
+> errors on `/admit` that did not exist before, 88 versus 0. Documented, not
+> fixed, with a recommended revert.
 
 ---
 
@@ -67,10 +74,41 @@ Both produced clean-looking tables while measuring nothing.
 
 ---
 
+## ⚠️ OPS-2202-R — My own fix introduced a regression (found, not fixed)
+
+**This is a scar from shipped work, not from the original system.**
+
+- **S — Symptom:** `POST /api/hospitals/:id/admit` under 500 concurrent admits to one hospital returns **88 HTTP 500s carrying `ER_LOCK_WAIT_TIMEOUT` (MySQL 1205)**. At the pre-change pool size these errors are **zero**. Successful admits also *fell*: **82 → 67**.
+- **C — Cause:** **The pool of 2 was not undersized — it was rationing access to a serialized resource.** Admits to one hospital row serialize on an InnoDB X row lock held for the whole transaction, including the 500 ms `notifyBedRegistry` call inside it ([`api/server.js:133`](./api/server.js#L133)). Single-row throughput is `1/W_lock` ≈ **2 admits/s regardless of pool size** — extra connections buy *waiters*, not throughput. Raising the pool to 25 put **25 transactions on one row, 24 of them WAITING behind 1 holder** (`performance_schema.data_locks`), so the last waiter's wait `(N−1) × 0.5 s` = 12 s exceeded the 5 s `innodb-lock-wait-timeout`. `Innodb_row_lock_time_avg` measured **5,276 ms** — pinned at the timeout. **Queueing became failing.**
+- **A — Action:** **None. This is documented, not fixed.** A fix could not be verified within the deadline, and shipping an unverified fix is what this lab spent two incidents learning not to do.
+- **R — Result:** Regression confirmed with a control arm (pool=2 → **0** timeouts; pool=25 → **88**), which is what makes it causal rather than correlational. Crossover arithmetic: `(N−1) × 0.5 s < 5 s` ⇒ **N ≤ 10 safe, crossover at N ≈ 11.** **Values between 3 and 10 were not measured** — the bound is arithmetic plus two endpoints.
+- **Scar / lesson:** **A change measured as a no-op on one endpoint was a regression on another.** The pool raise was verified against `/recent` and `/search` (+1.0%, −0.1%) and shipped on that evidence. It was never measured against the endpoint whose service time is **958× larger** (508.86 ms vs 0.531 ms) — and that is the only endpoint where pool size could possibly matter, since `N = λ·W` scales with W. **The endpoint I used to justify the change (admit) is the one I did not test it on.** Verify a shared-resource change against the endpoint with the *longest* hold time, not the most traffic.
+  **Alert that would have caught it:** `db_errors_total{code="ER_LOCK_WAIT_TIMEOUT"} > 0` — it fires cleanly here and would have fired on the first deploy. Notably this is the *only* incident in this lab where error-rate alerting works, because it is the only one where the system fails rather than degrades.
+- **Evidence:** [`evidence/OPS-2203-partial/`](./evidence/OPS-2203-partial/) — `k6-pool25.txt`, `k6-pool2-control.txt`, `innodb-status.txt` (TRANSACTIONS verbatim), `error-code-breakdown.txt`.
+
+> **Decision required — revert or not.** Recommended: **revert the default to
+> `MYSQL_POOL_SIZE=8`** (one line, [`api/database.js:38`](./api/database.js#L38)),
+> because (a) pool=2 is *measured* to produce zero timeouts, (b) OPS-2202's A/B
+> measured the raise as worth **+1.0%, i.e. nothing**, so reverting costs no
+> measured throughput, and (c) 8 stays under the N≈11 crossover while keeping
+> headroom above the original 2. **Not done here** because it is a behaviour
+> change that could not be re-verified against all four endpoints in the time
+> left. **The real fix is not the pool size** — it is moving the 500 ms
+> `notifyBedRegistry` call out of the transaction, shrinking the critical section
+> from ~508 ms to one `UPDATE`. That is an OPS-2203 fix and was not attempted.
+
+---
+
 ## Not investigated
 
-**OPS-2203 (bed admissions) and OPS-2204 (nightly export) were not worked.** No
-reproduction was run, no fix attempted. Predictions for both were pre-registered
+**OPS-2204 (nightly export) was not worked at all.** No reproduction was run, no
+fix attempted.
+
+**OPS-2203 was only partially touched** — `reproduce-OPS-2203.js` was run twice,
+but solely as a **regression test of my own shipped pool change** (scar
+OPS-2202-R above). The incident's actual root cause, its capacity math, its
+failure signature at the original pool size (P1), and any fix were **NOT
+investigated.** Predictions for both were pre-registered
 in [`LAB_JOURNAL.md`](./LAB_JOURNAL.md) **before** the deadline and are left
 standing as **untested** — they are hypotheses, not findings.
 

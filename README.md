@@ -7,13 +7,31 @@
 > | Baseline | ✅ | 3 runs + variance. **p95 varies 24% run-to-run, p99 99%** — so p99 is treated as inadmissible evidence throughout |
 > | **OPS-2201** | ✅ fixed & verified | **34.09 → 4,247 req/s (124.6×)**. Not from the index the ticket implied — that made the DB 2.5× faster and moved throughput +1.6% |
 > | **OPS-2202** | ✅ fixed & verified | Pool was **9% utilized**; the bottleneck was one JS thread at 3,391 req/s. Pool raise was a **documented no-op (+1.0%)** |
-> | OPS-2203 | ⛔ **not investigated** | Never reproduced. Pre-registered predictions left standing, marked untested |
+> | OPS-2203 | ⚠️ **partial** | Regression test of my own shipped work only. **Found a live regression — see below.** Root cause NOT investigated |
 > | OPS-2204 | ⛔ **not investigated** | Never reproduced. One adjacent measurement: 1-VU export = 34.47 MiB, did not OOM |
 >
 > **Why two of four:** each was worked to the rubric's standard — reproduce,
 > evidence, mechanism + capacity arithmetic, one concern per commit, re-measure
 > against a known noise floor. That is slower than four thin write-ups, and I
 > chose depth. The two undone are marked undone rather than padded.
+>
+> ### ⚠️ Known live regression in this submission's own code
+>
+> **OPS-2202's pool raise (`connectionLimit` 2 → 25) introduces
+> `ER_LOCK_WAIT_TIMEOUT` (MySQL 1205) errors on `POST /api/hospitals/:id/admit`
+> that do not exist at pool=2: 88 versus 0, with successful admits falling
+> 82 → 67.** Confirmed with a control arm. Cause: the small pool was rationing
+> access to a row lock held for 508 ms; a bigger pool adds waiters, not
+> throughput, until the last waiter exceeds the 5 s lock timeout and queueing
+> becomes failing.
+>
+> **Documented, not fixed** — no fix could be verified before the deadline.
+> Recommended action: revert the default to `MYSQL_POOL_SIZE=8`
+> (`api/database.js:38`); crossover math gives N ≤ 10 safe, and OPS-2202 measured
+> the raise as worth +1.0%, so reverting costs nothing measured. The real fix is
+> moving the 500 ms registry call out of the transaction. See
+> [`SCARS.md`](./SCARS.md) scar **OPS-2202-R** and the OPS-2203 PARTIAL section
+> of [`LAB_JOURNAL.md`](./LAB_JOURNAL.md).
 >
 > **Three things worth your time if you read nothing else:**
 > 1. **The obvious fix didn't work, and the journal proves it rather than

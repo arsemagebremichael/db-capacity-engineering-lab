@@ -1,0 +1,210 @@
+===============================================================================
+OPS-2203 PARTIAL — CONTROL ARM at the PRE-OPS-2202 pool size
+Without this arm, '88 lock timeouts at pool=25' is a correlation. With it, the
+pool raise is shown to be the CAUSE.
+TREATMENT VERIFIED: MYSQL_POOL_SIZE=2
+P1 predicted near-zero 1205s at pool=2, because 2 transactions => 1 waiter =>
+max wait ~500ms against a 5s timeout.
+Started unix: 1786512923
+===============================================================================
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: load-tests/reproduce-OPS-2203.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 500 max VUs, 1m0s max duration (incl. graceful stop):
+              * admissions_surge: 500 looping VUs for 30s (gracefulStop: 30s)
+
+
+running (0m01.0s), 500/500 VUs, 12269 complete and 0 interrupted iterations
+admissions_surge   [   3% ] 500 VUs  01.0s/30s
+
+running (0m02.0s), 500/500 VUs, 26514 complete and 0 interrupted iterations
+admissions_surge   [   7% ] 500 VUs  02.0s/30s
+
+running (0m03.0s), 500/500 VUs, 41462 complete and 0 interrupted iterations
+admissions_surge   [  10% ] 500 VUs  03.0s/30s
+
+running (0m04.0s), 500/500 VUs, 56554 complete and 0 interrupted iterations
+admissions_surge   [  13% ] 500 VUs  04.0s/30s
+
+running (0m05.0s), 500/500 VUs, 70897 complete and 0 interrupted iterations
+admissions_surge   [  17% ] 500 VUs  05.0s/30s
+
+running (0m06.0s), 500/500 VUs, 84072 complete and 0 interrupted iterations
+admissions_surge   [  20% ] 500 VUs  06.0s/30s
+
+running (0m07.0s), 500/500 VUs, 96709 complete and 0 interrupted iterations
+admissions_surge   [  23% ] 500 VUs  07.0s/30s
+
+running (0m08.0s), 500/500 VUs, 106818 complete and 0 interrupted iterations
+admissions_surge   [  27% ] 500 VUs  08.0s/30s
+
+running (0m09.0s), 500/500 VUs, 119113 complete and 0 interrupted iterations
+admissions_surge   [  30% ] 500 VUs  09.0s/30s
+
+running (0m10.0s), 500/500 VUs, 132598 complete and 0 interrupted iterations
+admissions_surge   [  33% ] 500 VUs  10.0s/30s
+
+running (0m11.0s), 500/500 VUs, 146693 complete and 0 interrupted iterations
+admissions_surge   [  37% ] 500 VUs  11.0s/30s
+
+running (0m12.0s), 500/500 VUs, 161242 complete and 0 interrupted iterations
+admissions_surge   [  40% ] 500 VUs  12.0s/30s
+
+running (0m13.0s), 500/500 VUs, 175443 complete and 0 interrupted iterations
+admissions_surge   [  43% ] 500 VUs  13.0s/30s
+
+running (0m14.0s), 500/500 VUs, 189502 complete and 0 interrupted iterations
+admissions_surge   [  47% ] 500 VUs  14.0s/30s
+
+running (0m15.0s), 500/500 VUs, 202820 complete and 0 interrupted iterations
+admissions_surge   [  50% ] 500 VUs  15.0s/30s
+
+running (0m16.0s), 500/500 VUs, 216900 complete and 0 interrupted iterations
+admissions_surge   [  53% ] 500 VUs  16.0s/30s
+
+running (0m17.0s), 500/500 VUs, 228657 complete and 0 interrupted iterations
+admissions_surge   [  57% ] 500 VUs  17.0s/30s
+
+running (0m18.0s), 500/500 VUs, 239342 complete and 0 interrupted iterations
+admissions_surge   [  60% ] 500 VUs  18.0s/30s
+
+running (0m19.0s), 500/500 VUs, 251104 complete and 0 interrupted iterations
+admissions_surge   [  63% ] 500 VUs  19.0s/30s
+
+running (0m20.0s), 500/500 VUs, 262338 complete and 0 interrupted iterations
+admissions_surge   [  67% ] 500 VUs  20.0s/30s
+
+running (0m21.0s), 500/500 VUs, 273228 complete and 0 interrupted iterations
+admissions_surge   [  70% ] 500 VUs  21.0s/30s
+
+running (0m22.0s), 500/500 VUs, 281690 complete and 0 interrupted iterations
+admissions_surge   [  73% ] 500 VUs  22.0s/30s
+
+running (0m23.0s), 500/500 VUs, 293911 complete and 0 interrupted iterations
+admissions_surge   [  77% ] 500 VUs  23.0s/30s
+
+running (0m24.0s), 500/500 VUs, 307543 complete and 0 interrupted iterations
+admissions_surge   [  80% ] 500 VUs  24.0s/30s
+
+running (0m25.0s), 500/500 VUs, 320345 complete and 0 interrupted iterations
+admissions_surge   [  83% ] 500 VUs  25.0s/30s
+
+running (0m26.0s), 500/500 VUs, 332437 complete and 0 interrupted iterations
+admissions_surge   [  87% ] 500 VUs  26.0s/30s
+
+running (0m27.0s), 500/500 VUs, 345109 complete and 0 interrupted iterations
+admissions_surge   [  90% ] 500 VUs  27.0s/30s
+
+running (0m28.0s), 500/500 VUs, 358037 complete and 0 interrupted iterations
+admissions_surge   [  93% ] 500 VUs  28.0s/30s
+
+running (0m29.0s), 500/500 VUs, 371777 complete and 0 interrupted iterations
+admissions_surge   [  97% ] 500 VUs  29.0s/30s
+
+running (0m30.0s), 500/500 VUs, 385399 complete and 0 interrupted iterations
+admissions_surge   [ 100% ] 500 VUs  30.0s/30s
+
+running (0m31.0s), 031/500 VUs, 386026 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m32.0s), 029/500 VUs, 386028 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m33.0s), 027/500 VUs, 386030 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m34.0s), 025/500 VUs, 386032 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m35.0s), 023/500 VUs, 386034 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m36.0s), 021/500 VUs, 386036 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m37.0s), 019/500 VUs, 386038 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m38.0s), 017/500 VUs, 386040 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m39.0s), 015/500 VUs, 386042 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m40.0s), 013/500 VUs, 386044 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m41.0s), 011/500 VUs, 386046 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m42.0s), 009/500 VUs, 386048 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m43.0s), 007/500 VUs, 386050 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m44.0s), 005/500 VUs, 386052 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m45.0s), 003/500 VUs, 386054 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+running (0m46.0s), 001/500 VUs, 386056 complete and 0 interrupted iterations
+admissions_surge ↓ [ 100% ] 500 VUs  30s
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<1000' p(95)=51.04ms
+
+    http_req_failed
+    ✗ 'rate<0.05' rate=99.97%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 386057 8350.97577/s
+    checks_succeeded...: 0.02%  83 out of 386057
+    checks_failed......: 99.97% 385974 out of 386057
+
+    ✗ status is 200
+      ↳  0% — ✓ 83 / ✗ 385974
+
+    HTTP
+    http_req_duration..............: min=645µs    med=32.83ms avg=39.44ms p(95)=51.04ms max=26.98s
+      { expected_response:true }...: min=565.94ms med=17.21s  avg=15.49s  p(95)=24.51s  max=26.98s
+    http_req_failed................: 99.97% 385974 out of 386057
+    http_reqs......................: 386057 8350.97577/s
+
+    EXECUTION
+    iteration_duration.............: min=674.66µs med=32.85ms avg=39.55ms p(95)=51.07ms max=27.12s
+    iterations.....................: 386057 8350.97577/s
+    vus............................: 1      min=1                max=500
+    vus_max........................: 500    min=500              max=500
+
+    NETWORK
+    data_received..................: 130 MB 2.8 MB/s
+    data_sent......................: 56 MB  1.2 MB/s
+
+
+
+
+running (0m46.2s), 000/500 VUs, 386057 complete and 0 interrupted iterations
+admissions_surge ✓ [ 100% ] 500 VUs  30s
+time="2026-08-12T08:36:10+03:00" level=error msg="thresholds on metrics 'http_req_failed' have been crossed"
+unix end: 1786512970
+=== CONTROL: db_errors_total by code at pool=2 ===
+  NO DB ERRORS in window
+  status 200: 82
+Variable_name	Value
+Innodb_row_lock_time_max	5825

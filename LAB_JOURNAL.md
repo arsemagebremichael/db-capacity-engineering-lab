@@ -13,11 +13,18 @@
 > | Baseline | ✅ 3 runs, variance, 1-VU service time per endpoint | [`evidence/baseline/`](evidence/baseline/) |
 > | OPS-2201 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2201/`](evidence/OPS-2201/) |
 > | OPS-2202 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2202/`](evidence/OPS-2202/) |
-> | OPS-2203 | ⛔ **not investigated** — never reproduced | none; predictions untested |
+> | OPS-2203 | ⚠️ **partial** — regression test of shipped work only, NOT an investigation | [`evidence/OPS-2203-partial/`](evidence/OPS-2203-partial/) |
 > | OPS-2204 | ⛔ **not investigated** — never reproduced | none; predictions untested |
 > | Synthesis | ✅ complete, from evidence gathered | this file |
 > | [`SCARS.md`](SCARS.md) | ✅ 2 incident scars + 1 methodology scar | — |
 > | Grafana screenshots | ⏳ shoot list with exact PromQL + unix windows | [`evidence/grafana-captures.md`](evidence/grafana-captures.md) |
+>
+> **⚠️ A LIVE REGRESSION WAS FOUND IN SHIPPED CODE.** After the main submission
+> was pushed, one pre-registered prediction was tested because it implicated
+> already-committed work: OPS-2202's pool raise (2 → 25) **creates
+> `ER_LOCK_WAIT_TIMEOUT` errors on `POST /api/hospitals/:id/admit` that do not
+> exist at pool=2** — 88 versus 0, with successful admits falling 82 → 67. It is
+> documented, not fixed; see the OPS-2203 PARTIAL section and [`SCARS.md`](SCARS.md).
 >
 > **Why two rather than four:** each incident was worked to the standard the
 > rubric asks for — reproduce, gather evidence, name the mechanism with capacity
@@ -1364,15 +1371,128 @@ it. **Only (1)–(3) change the failure shape. (4) only moves it.**
 
 ---
 
-## Investigation — OPS-2203 — ⛔ NOT INVESTIGATED
+## Investigation — OPS-2203 — ⚠️ PARTIAL: regression test only, NOT a full investigation
 *Ticket:* [Bed admissions fail with DB errors under load](./incidents/OPS-2203.md)
 *Reproduce:* `k6 run load-tests/reproduce-OPS-2203.js`
 
-> ## ⛔ NOT INVESTIGATED — no reproduction was run, no fix attempted
+> ## ⚠️ SCOPE OF WHAT WAS ACTUALLY DONE HERE — read before using any of it
 >
-> Work stopped at a deadline after OPS-2201 and OPS-2202. **`reproduce-OPS-2203.js`
-> was never executed.** There is no `evidence/OPS-2203/` directory. Nothing below
-> is a finding.
+> **This is a regression test of my own shipped OPS-2202 work. It is NOT an
+> investigation of OPS-2203.** One pre-registered prediction was tested because
+> it implicated code already committed and pushed. Nothing else about this
+> incident was investigated.
+>
+> | | Status |
+> |---|---|
+> | P1-corollary (pool raise creates 1205s) | ✅ **TESTED — confirmed**, with a control arm |
+> | Root cause of OPS-2203 | ⛔ **NOT INVESTIGATED** |
+> | Capacity math for max admits/sec on one row | ⛔ **NOT DERIVED** |
+> | P1 (failure signature at pool=2 is an app-side stall) | ⛔ **NOT TESTED** — see below |
+> | A fix for OPS-2203 | ⛔ **NONE ATTEMPTED** |
+> | Blast radius / bystander probing | ⛔ **NOT MEASURED** |
+>
+> **What this does NOT establish:** the ticket describes admissions failing under
+> load, and this test does not diagnose that. It shows only that *a change I
+> shipped* made a specific failure mode appear. The mechanism behind the ticket —
+> why one admit costs 508.86 ms in the first place — was **not investigated**.
+
+### P1-corollary — TESTED AND CONFIRMED. This is a live regression in shipped code.
+
+**Prediction, registered before OPS-2202 was fixed** (unchanged, see the
+pre-registration section above): the pool of 2 was *suppressing* lock-wait
+timeouts by admitting only 2 transactions at a time. Raising it to N puts N
+transactions on one row; the last waiter waits ≈ `(N−1) × 0.5 s`, crossing the
+5 s `innodb-lock-wait-timeout` at **N ≈ 11**. Shipped pool: **25**.
+
+**Treatment verified before measuring** (the rule I burned twice):
+`docker compose exec capacity-api env` → `MYSQL_POOL_SIZE=25`, confirmed per arm.
+
+**Result — 500 VUs, 30 s, all admitting to hospital id 1:**
+
+| | pool=2 (control, pre-OPS-2202) | **pool=25 (shipped)** |
+|---|---:|---:|
+| `ER_LOCK_WAIT_TIMEOUT` (1205) | **0** | **88** |
+| Successful admits (HTTP 200) | **82** | **67** |
+| HTTP 500 | 0 | **88** |
+| `db_errors_total` series | **never created** | `code=ER_LOCK_WAIT_TIMEOUT` |
+
+> **P1-corollary: ✅ HIT.** Predicted lock-wait timeouts would appear above
+> N ≈ 11; shipped N = 25; **88 appeared, and zero appear at N = 2.** The control
+> arm is what makes this causal rather than correlational.
+
+**Server-side confirmation** — `SHOW ENGINE INNODB STATUS` captured *inside* the
+k6 window (verbatim in [`evidence/OPS-2203-partial/innodb-status.txt`](evidence/OPS-2203-partial/innodb-status.txt)):
+
+```
+---TRANSACTION 2063, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table
+`capacity_lab`.`hospitals` trx id 2063 lock_mode X locks rec but not gap waiting
+```
+
+```
+LOCK_TYPE  LOCK_MODE        LOCK_STATUS   n
+TABLE      IX               GRANTED      25
+RECORD     X,REC_NOT_GAP    GRANTED       1     <- one holder
+RECORD     X,REC_NOT_GAP    WAITING      24     <- the entire rest of the pool
+waiting_trx: 24     total_trx: 25     Max_used_connections: 26
+```
+
+**Every one of the 25 pooled connections is inside a transaction on the same
+row; 24 of them are queued behind a single holder.** MySQL's own counters agree:
+`Innodb_row_lock_waits` 156, **`Innodb_row_lock_time_avg` 5,276 ms**,
+`Innodb_row_lock_time_max` 5,825 ms — waits pinned at the 5 s timeout, which is
+what a 1205 *is*.
+
+**Why raising the pool made it worse, stated as the mechanism:** the pool of 2
+was not protecting the database by being small — it was **rationing access to a
+serialized resource**. Admits to one hospital row are serialized by an X row
+lock held for the duration of the transaction, which includes the 500 ms
+`notifyBedRegistry` call ([`api/server.js:133`](api/server.js#L133)). Throughput
+on that row is bounded by `1/W_lock` ≈ 2 admits/s **no matter how many
+connections exist**. Adding connections adds *waiters*, not throughput — and
+once the queue of waiters is deep enough that the last one waits longer than
+`innodb-lock-wait-timeout`, waiting turns into **failing**.
+
+**The regression converted queueing into errors, and reduced successful work:**
+82 → 67 successful admits. Callers that previously waited now get a 500.
+
+### Safe pool size, from the crossover arithmetic
+
+```
+last waiter's wait ~= (N - 1) x W_lock,  W_lock ~= 0.5 s (measured 508.86 ms at 1 VU)
+require (N - 1) x 0.5 s  <  5 s  (innodb-lock-wait-timeout)
+=>  N - 1 < 10  =>  N <= 10 ; crossover at N ~= 11
+```
+
+Measured endpoints of that curve: **N=2 → 0 timeouts**, **N=25 → 88 timeouts**.
+**N ≤ 10 is predicted safe; N = 8 leaves margin. Values between 3 and 10 were
+NOT measured** — the safe bound is arithmetic plus two endpoints, not a swept
+curve.
+
+**No fix was shipped for this.** Per the deadline rule, nothing goes out that
+cannot be verified in the time available. Recommendation and revert decision are
+recorded in [`SCARS.md`](SCARS.md) and [`README.md`](README.md).
+
+**The real fix is not the pool size.** It is moving the 500 ms
+`notifyBedRegistry` network call **out of the transaction**, which shrinks the
+critical section from ~508 ms to the duration of a single `UPDATE` and raises the
+single-row ceiling by orders of magnitude. That is an OPS-2203 fix and **was not
+attempted, measured, or verified.**
+
+### What P1 (the original prediction) still does NOT have
+
+**P1 predicted that at pool=2 the failure signature is an app-side pool-queue
+stall rather than a DB error. This test did not score P1.** The control arm shows
+**zero** DB errors at pool=2, which is consistent with P1's first half. But I did
+**not** measure the app-side queue latency, the offered-vs-served rate, or the
+throughput ceiling at pool=2 — and at pool=2 the run served only 82 admits, which
+is consistent with a stall but **was not characterized**. P1 remains **untested**.
+
+> ## ⛔ The rest of OPS-2203 — STILL NOT INVESTIGATED
 >
 > **The one measured number that exists** comes from baseline service-time
 > capture, not from this investigation:

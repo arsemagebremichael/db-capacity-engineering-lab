@@ -1,0 +1,27 @@
+===============================================================================
+OPS-2203 PARTIAL — FULL ERROR-CODE BREAKDOWN (pre-registered artifact)
+k6 window unix 1786512780 -> 1786512836. Totals via Prometheus increase() over the window.
+Captured whether or not it confirms P1-corollary.
+===============================================================================
+=== HTTP status codes on /api/hospitals/:id/admit ===
+  status  500:           88  (56.50%)
+  status  200:           67  (43.50%)
+        TOTAL:          155
+=== DB error codes (db_errors_total) — THE decisive number ===
+  code=ER_LOCK_WAIT_TIMEOUT         route=/api/hospitals/:id/admit     count=          88
+=== MySQL server-side lock-wait counters (GLOBAL) ===
+Variable_name	Value
+Innodb_row_lock_waits	156
+Variable_name	Value
+Innodb_row_lock_time_avg	5276
+Variable_name	Value
+Innodb_row_lock_time_max	5825
+Variable_name	Value
+Innodb_row_lock_current_waits	0
+Variable_name	Value
+Max_used_connections	26
+=== confirm where the other ~387k requests went (503 label) ===
+  route=/api/hospitals/1/admit           status= 503       414,229
+  route=/api/hospitals/:id/admit         status= 500            88
+  route=/api/hospitals/:id/admit         status= 200            67
+  route=/metrics                         status= 200            10

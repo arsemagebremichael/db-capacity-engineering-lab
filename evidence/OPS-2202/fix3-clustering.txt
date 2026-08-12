@@ -1,0 +1,14 @@
+===============================================================================
+OPS-2202 FIX 3 — clustering (WORKERS=N). MAX_INFLIGHT=4096 so shedding is OFF
+and this isolates the ceiling effect.
+PREDICTION P6: 2-3.5x of 3,391 req/s (sub-linear: k6 + 5 containers share this
+  host). p95 still hundreds of ms at the SAME 2000 VUs, still 0% errors --
+  i.e. the collapse POINT moves, the collapse SHAPE does not.
+Host logical CPUs: 10. Container memory cap: 160MB.
+Captured: 2026-08-12T05:11:30Z UTC
+===============================================================================
+WORKERS            rps         p95     fail%    peak_RSS   cpu_cores
+1          3374.095443     700.5ms     0.00% 77.3MiB / 160MiB      1.5029
+2          4991.383752    448.35ms     0.00% 119.9MiB / 160MiB      1.4258
+3          2470.750236       1.13s     0.00% 154.2MiB / 160MiB      0.7727
+4           1684.23067       1.61s     0.00% 159.3MiB / 160MiB      0.6303

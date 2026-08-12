@@ -14,6 +14,7 @@
  *   GET  /metrics                    Prometheus metrics
  */
 
+const cluster = require('node:cluster');
 const express = require('express');
 const client = require('prom-client');
 const { getPool, getMongo } = require('./database');
@@ -274,9 +275,40 @@ app.get('/api/audit/ping', async (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Boot
+// Boot — optionally clustered (OPS-2202)
 // ---------------------------------------------------------------------------
-app.listen(PORT, () => {
+// Admission control changes the SHAPE of overload (some fail fast, the rest stay
+// inside SLO). It does not raise the ceiling. Clustering raises the ceiling by
+// running one process per core, since the bottleneck is a single JS thread at
+// ~0.295ms/request.
+//
+// Two costs, both real and both measured in LAB_JOURNAL.md:
+//  1. MEMORY. Each worker is a full V8 heap. The container cap is 160MB and a
+//     single process already sits at ~98MB RSS, so worker count is bounded by
+//     memory long before it is bounded by cores. This is the same budget
+//     OPS-2204's export is about to exhaust.
+//  2. It does NOT change the collapse shape. At 4x the ceiling and 4x the load
+//     you get the same unbounded queue and the same brownout -- it moves the
+//     cliff without removing it. That is why admission control ships first.
+//
+// Metrics caveat: each worker keeps its own prom-client registry, and workers
+// share the listening socket, so /metrics returns whichever worker answered.
+// With WORKERS>1 the Prometheus numbers are per-worker, not per-service, and
+// the clustering measurements below rely on k6 and `docker stats` instead.
+const WORKERS = Number(process.env.WORKERS || 1);
+
+if (WORKERS > 1 && cluster.isPrimary) {
   // eslint-disable-next-line no-console
-  console.log(`capacity-api listening on :${PORT} (metrics at /metrics, in-flight cap ${MAX_INFLIGHT})`);
-});
+  console.log(`capacity-api primary ${process.pid} forking ${WORKERS} workers`);
+  for (let i = 0; i < WORKERS; i += 1) cluster.fork();
+  cluster.on('exit', (worker, code, signal) => {
+    // eslint-disable-next-line no-console
+    console.error(`worker ${worker.process.pid} exited (code=${code} signal=${signal}); forking a replacement`);
+    cluster.fork();
+  });
+} else {
+  app.listen(PORT, () => {
+    // eslint-disable-next-line no-console
+    console.log(`capacity-api listening on :${PORT} (metrics at /metrics, pid ${process.pid}, in-flight cap ${MAX_INFLIGHT})`);
+  });
+}

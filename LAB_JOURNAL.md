@@ -2,6 +2,37 @@
 
 **Engineer:** Arsema G. Gebremichael  **Date:** 2026-08-12
 
+> ## 📦 Scope of this submission — read first
+>
+> **Shipped, fully evidenced:** baseline (3 runs + variance + per-endpoint
+> service time), **OPS-2201**, **OPS-2202**, and the post-incident synthesis.
+> **Not investigated: OPS-2203 and OPS-2204** — work stopped at a deadline.
+>
+> | | Status | Evidence |
+> |---|---|---|
+> | Baseline | ✅ 3 runs, variance, 1-VU service time per endpoint | [`evidence/baseline/`](evidence/baseline/) |
+> | OPS-2201 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2201/`](evidence/OPS-2201/) |
+> | OPS-2202 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2202/`](evidence/OPS-2202/) |
+> | OPS-2203 | ⛔ **not investigated** — never reproduced | none; predictions untested |
+> | OPS-2204 | ⛔ **not investigated** — never reproduced | none; predictions untested |
+> | Synthesis | ✅ complete, from evidence gathered | this file |
+> | [`SCARS.md`](SCARS.md) | ✅ 2 incident scars + 1 methodology scar | — |
+> | Grafana screenshots | ⏳ shoot list with exact PromQL + unix windows | [`evidence/grafana-captures.md`](evidence/grafana-captures.md) |
+>
+> **Why two rather than four:** each incident was worked to the standard the
+> rubric asks for — reproduce, gather evidence, name the mechanism with capacity
+> arithmetic, fix one concern per commit, re-measure against a known noise floor
+> — and that took longer than half the time. Rather than produce four thin
+> write-ups, two are complete and two are honestly marked undone. **The
+> pre-registered predictions for OPS-2203 and OPS-2204 are left in place,
+> explicitly labelled untested**, because deleting them would hide that they
+> were made in advance; and one of them (P1-corollary) flags a **possible
+> regression introduced by shipped OPS-2202 work that was never measured.**
+>
+> **Nothing in this journal is estimated.** Every number was measured and its raw
+> output is committed. Where something was not measured it says **NOT MEASURED**
+> or **NOT INVESTIGATED**.
+
 This is your investigation notebook. You are on call for the Regional Health
 platform and working the [incident queue](./incidents/README.md). For each
 incident you will:
@@ -1333,9 +1364,65 @@ it. **Only (1)–(3) change the failure shape. (4) only moves it.**
 
 ---
 
-## Investigation — OPS-2203
+## Investigation — OPS-2203 — ⛔ NOT INVESTIGATED
 *Ticket:* [Bed admissions fail with DB errors under load](./incidents/OPS-2203.md)
 *Reproduce:* `k6 run load-tests/reproduce-OPS-2203.js`
+
+> ## ⛔ NOT INVESTIGATED — no reproduction was run, no fix attempted
+>
+> Work stopped at a deadline after OPS-2201 and OPS-2202. **`reproduce-OPS-2203.js`
+> was never executed.** There is no `evidence/OPS-2203/` directory. Nothing below
+> is a finding.
+>
+> **The one measured number that exists** comes from baseline service-time
+> capture, not from this investigation:
+> `POST /api/hospitals/1/admit` has **W = 508.86 ms at 1 VU** (30 iterations,
+> min 504.94 / max 515.36 ms) — [`evidence/baseline/service-time-1vu.txt`](evidence/baseline/service-time-1vu.txt).
+> Half a second to decrement one integer, **with no contention present**, which
+> is why the fixed cost is suspected to sit inside the transaction. That is an
+> observation about the endpoint's uncontended cost. It is **not** a diagnosis of
+> the incident.
+>
+> The predictions below were **pre-registered before the deadline** and are left
+> standing deliberately. They are **untested hypotheses**, and the ticket's own
+> warning applies to them as much as to the ticket: they may be wrong.
+
+### Pre-registered, UNTESTED predictions
+
+**P1 — OPS-2203 will NOT be a lock-wait-timeout incident.** *(untested)*
+With `connectionLimit: 2`, at most 2 transactions are in flight, so at most
+**1 waiter**, whose worst case is the holder's critical section ≈ **500 ms**.
+`--innodb-lock-wait-timeout=5` is **10× larger** than the worst possible wait, so
+ER_LOCK_WAIT_TIMEOUT (**1205**) should be near zero, and the remaining 498 of 500
+VUs should stall in the *application's* pool queue — which, with `queueLimit: 0`
+and no acquire timeout, cannot produce an error at all, only unbounded latency.
+Predicted failure signature: **app-side pool-queue stall, not a database error.**
+*Required artifact:* full k6 error-code breakdown **plus the
+`SHOW ENGINE INNODB STATUS` TRANSACTIONS section verbatim, whether or not it
+shows waits.* **Never captured.**
+
+**P1-corollary — the OPS-2202 fix should CREATE this failure.** *(untested, and
+now materially more likely to be testable)* The tiny pool was *suppressing*
+lock-wait timeouts by admitting only 2 transactions. **The pool is now 25**
+(shipped in OPS-2202). With N transactions contending for one row, the queue
+moves from the app tier into InnoDB and the last waiter's expected wait scales
+as `(N−1) × 0.5 s`, crossing the 5 s timeout at **N ≈ 11**. At the shipped pool
+of 25, **real 1205 errors that do not exist today are predicted to appear.**
+*This is the highest-value untested item in the repo:* it would demonstrate a fix
+in one incident manufacturing the failure mode of another. **It also means
+OPS-2202's pool raise may have introduced a regression in the admit path that
+was never measured** — flagged as a known risk of shipped work, not a finding.
+
+**Falsifier for the detector proposed in the synthesis:** if admits serialize on
+a row lock while the enlarged pool absorbs the waiters, `http_requests_in_flight`
+may stay **low** while throughput collapses to ~2/s. An app-tier queue-depth
+gauge cannot see a queue that formed inside InnoDB.
+
+### Everything below is unfilled template
+
+---
+
+## Investigation — OPS-2203 (template, not completed)
 
 ### Hypothesis
 > Given one-at-a-time works but concurrent admits to the *same* hospital fail,
@@ -1376,9 +1463,78 @@ it. **Only (1)–(3) change the failure shape. (4) only moves it.**
 
 ---
 
-## Investigation — OPS-2204
+## Investigation — OPS-2204 — ⛔ NOT INVESTIGATED
 *Ticket:* [Nightly export crashes the service repeatedly](./incidents/OPS-2204.md)
 *Reproduce:* `k6 run load-tests/reproduce-OPS-2204.js`
+
+> ## ⛔ NOT INVESTIGATED — no reproduction was run, no fix attempted
+>
+> Work stopped at a deadline after OPS-2201 and OPS-2202. **`reproduce-OPS-2204.js`
+> was never executed.** There is no `evidence/OPS-2204/` directory, no OOM was
+> ever provoked, and no streaming fix was written. Nothing below is a finding.
+>
+> **Measured data points that do exist**, all captured for other purposes:
+>
+> | Measurement | Value | Source |
+> |---|---|---|
+> | Export payload, 1 VU | **36,141,185 B = 34.47 MiB** per call | [`evidence/baseline/service-time-1vu.txt`](evidence/baseline/service-time-1vu.txt) |
+> | Export W, 1 VU | 545.89 ms avg (10 iterations) | same |
+> | **1-VU export did NOT OOM** | `RestartCount 0`, `exitCode 0`, `OOMKilled=false` | same |
+> | Peak RSS under *search* load alone | **148.7 MiB / 160 MiB (93%)** | [`evidence/OPS-2201/under-load-saturation.txt`](evidence/OPS-2201/under-load-saturation.txt) |
+> | Peak RSS, 3 / 4 cluster workers | 154.2 MiB (96%) / 159.3 MiB (99.6%) | [`evidence/OPS-2202/fix3-clustering.txt`](evidence/OPS-2202/fix3-clustering.txt) |
+>
+> The 1-VU result is **consistent with** the untested prediction below — a single
+> export fits — but it does not test it, because the prediction is about
+> *concurrent* exports.
+>
+> **What the adjacent evidence does establish** (and is used in the synthesis's
+> blast-radius ranking, labelled as inference): **memory is the shared hard
+> ceiling of this container.** Search alone reached 93% of it, and clustering
+> 99.6%. Both of those are unrelated to the export.
+
+### Pre-registered, UNTESTED prediction
+
+**P2 — the memory ceiling is NOT pool-limited.** *(untested)*
+The tempting reasoning — pool of 2 ⇒ at most 2 concurrent exports ⇒ ~69 MiB ⇒
+fits — is predicted to be **wrong**, because the connection is released when
+`pool.query()` *resolves*, while the expensive residency happens **after**: the
+100k row objects are already materialized, and `res.json()` then runs
+`JSON.stringify` over them, producing a second full copy as a 34.47 MiB string.
+Peak heap per in-flight export ≈ **row objects + serialized string**, and the
+number of exports simultaneously holding that memory is bounded by **concurrent
+HTTP requests (50 VUs), not by pool size**. The pool serializes *query
+execution*; it does not serialize *memory residency*.
+
+```
+160 MiB cgroup - ~98 MiB baseline RSS  ~=  62 MiB headroom
+34.5 MiB per payload copy, >=2 copies live per export
+=> budget exhausted at roughly 2-3 CONCURRENT exports
+```
+
+*Predicted:* OOM at **2–3 concurrent exports**, far below the script's 50 VUs,
+with the **kernel** killing the process rather than V8 throwing.
+*Required confirming/killing artifact:* **`docker inspect` exit code 137 and a
+climbing `RestartCount`.** 137 = SIGKILL from the cgroup OOM killer, the only
+thing distinguishing a kernel kill from a graceful V8 heap error (which would
+exit 134 and would mean `--max-old-space-size=256` bound first, killing P2's
+mechanism). **Never captured.**
+
+**Note this prediction is now conservative.** It assumed ~98 MiB baseline RSS.
+OPS-2201 measured search alone reaching **148.7 MiB**, leaving ~11 MiB of real
+headroom when a search burst overlaps the batch window — which would put the OOM
+threshold **below 1 concurrent export**. Untested.
+
+**Falsifier for the detector proposed in the synthesis:** a `SIGKILL` can land
+**between Prometheus's 5-second scrapes**, so `http_requests_in_flight` and
+`nodejs_heap_size_used_bytes` may never record the excursion that killed the
+process. Detecting this class likely needs `container_memory_working_set_bytes`
+(cAdvisor) plus restart-count alerting — **neither is wired up in this stack.**
+
+### Everything below is unfilled template
+
+---
+
+## Investigation — OPS-2204 (template, not completed)
 
 ### Hypothesis
 > Given memory spikes right before each restart and only the big export is

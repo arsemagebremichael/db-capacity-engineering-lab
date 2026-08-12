@@ -1,0 +1,17 @@
+===============================================================================
+OPS-2202 — MAX_INFLIGHT sweep (REDONE after an invalidated first attempt)
+First attempt was WRONG: 'VAR=x docker compose up' does not inject env into the
+container unless the compose file declares it, so all four arms silently ran at
+the default N=64. The tell: N=4096 vs 2000 VUs should reject NOTHING, yet
+reported 93.5% rejections -- identical to N=64. Plumbing fixed in
+docker-compose.override.yml; verified with 'docker compose exec env'.
+Captured: 2026-08-12T04:56:32Z UTC
+===============================================================================
+N           total_rps      reject%   admitted_rps  admitted_p95  cpu_cores
+64       10093.116461       93.58%            452         242ms     1.2786
+256       9686.316705       92.02%            609         957ms     1.3182
+1024      9465.415255       84.57%           1541        2293ms     1.3963
+4096      3562.433082        0.00%           3448         963ms     1.5225
+8        11209.086295       98.01%            158          96ms
+16       10624.603273       96.09%            354          96ms
+32        9615.993975       93.63%            627         198ms

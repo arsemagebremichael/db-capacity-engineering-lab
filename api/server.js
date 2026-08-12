@@ -59,6 +59,23 @@ const dbErrorsTotal = new client.Counter({
   registers: [register],
 });
 
+const requestsRejectedTotal = new client.Counter({
+  name: 'http_requests_rejected_total',
+  help: 'Requests shed by admission control because the server was at capacity',
+  labelNames: ['route'],
+  registers: [register],
+});
+
+// Queue depth — the metric that actually detects this failure mode. Event-loop
+// lag does not: it samples per-turn timer delay, so it stays flat when many
+// cheap callbacks are queued (measured 10ms mean through a 36x brownout in
+// OPS-2202). In-flight count reads the queue directly.
+const inFlightGauge = new client.Gauge({
+  name: 'http_requests_in_flight',
+  help: 'Requests currently being processed (queue depth on the single JS thread)',
+  registers: [register],
+});
+
 // Per-request timing + counting middleware
 app.use((req, res, next) => {
   const end = httpRequestDuration.startTimer();
@@ -69,6 +86,67 @@ app.use((req, res, next) => {
     httpRequestsTotal.inc(labels);
   });
   next();
+});
+
+// ---------------------------------------------------------------------------
+// Admission control (OPS-2202)
+// ---------------------------------------------------------------------------
+// The server has ONE JS thread and costs ~0.295ms of it per request => a hard
+// ceiling of ~3,391 req/s. Offered 2,000 concurrent requests, it accepted all
+// of them (nodejs_active_handles{type="Socket"}=2005) and made every caller
+// wait: p95 696ms, 36x baseline, with a 0.00% error rate. Everyone was served
+// slowly and nothing was reported as broken.
+//
+// Bounding in-flight work converts that into a choice: a bounded number of
+// callers get service inside SLO, the excess is rejected immediately and
+// cheaply. N is sized by Little's Law -- N = lambda x W_target -- not by taste.
+//
+// The second reason this beats simply adding capacity: shedding makes overload
+// VISIBLE. Two incidents so far have run at 0.00% error rate through severe
+// brownouts, invisible to error-rate alerting. A 503 is something the paging
+// stack already understands.
+// N=32 chosen from a measured sweep, not from theory. Little's Law suggested
+// N = lambda x W_target = 3,391 x 0.05 = ~170, which measured at ~950ms admitted
+// p95 -- badly outside SLO. The sweep (evidence/OPS-2202/fix2-inflight-sweep.txt)
+// shows why: rejections are not free (~0.09ms of the same JS thread each), and a
+// client that retries instantly turns a tight limit into a rejection storm that
+// starves real work. N=32 is the largest limit that still holds admitted p95
+// inside the 200ms SLO on this host:
+//   N=8   -> p95  96ms, admitted  158 rps, 98.0% shed
+//   N=16  -> p95  96ms, admitted  354 rps, 96.1% shed
+//   N=32  -> p95 198ms, admitted  627 rps, 93.6% shed   <-- shipped
+//   N=64  -> p95 242ms, admitted  452 rps, 93.6% shed
+//   N=1024-> p95 2293ms, admitted 1541 rps, 84.6% shed
+//   N=4096-> p95 963ms, admitted 3448 rps,  0.0% shed  (= no admission control)
+const MAX_INFLIGHT = Number(process.env.MAX_INFLIGHT || 32);
+let inFlight = 0;
+
+app.use((req, res, next) => {
+  // Never shed health or metrics: observability must survive the overload it
+  // is there to report, and both are cheap.
+  if (req.path === '/health' || req.path === '/metrics') return next();
+
+  if (inFlight >= MAX_INFLIGHT) {
+    requestsRejectedTotal.inc({ route: req.path });
+    res.set('Retry-After', '1');
+    return res.status(503).json({
+      error: 'OVERLOADED',
+      message: `server at capacity (${MAX_INFLIGHT} in flight)`,
+    });
+  }
+
+  inFlight += 1;
+  inFlightGauge.set(inFlight);
+  let released = false;
+  const release = () => {
+    if (released) return;      // 'finish' and 'close' can both fire
+    released = true;
+    inFlight -= 1;
+    inFlightGauge.set(inFlight);
+  };
+  res.on('finish', release);
+  res.on('close', release);    // client aborted before we responded
+  return next();
 });
 
 // ---------------------------------------------------------------------------
@@ -200,5 +278,5 @@ app.get('/api/audit/ping', async (_req, res) => {
 // ---------------------------------------------------------------------------
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
-  console.log(`capacity-api listening on :${PORT} (metrics at /metrics)`);
+  console.log(`capacity-api listening on :${PORT} (metrics at /metrics, in-flight cap ${MAX_INFLIGHT})`);
 });

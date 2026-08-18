@@ -187,6 +187,30 @@ elevated during 2201 (~45 ms) and **flat at ~12–14 ms during 2202's 36× brown
 
 ## OPS-2203 — bed admissions fail under load
 
+> ### ⚠️ You MUST pin the y-axis by hand for the after-shots
+>
+> Every panel in this dashboard is `min=auto, max=auto` (verified via the
+> dashboard API). For OPS-2203 that silently destroys the comparison, because
+> **after the fix panel 4 has no series at all** — `db_errors_total` was never
+> created. Grafana renders "No data" and auto-scales the before-shot to its own
+> peak, so the two images share no axis and prove nothing.
+>
+> Set these explicitly in Panel options → Axis → Soft/Standard min–max, the same
+> values on BOTH shots of a pair:
+>
+> | Panel | min | max | why |
+> |---|---:|---:|---|
+> | 4 — DB errors by code | `0` | **`1.5`** | before-run peak is **1.400 errors/s**; the after-shot must show that same axis with nothing on it |
+> | 1 — Throughput by route | `0` | **`20`** | before peak ≈ 2.3 admits/s, after peak ≈ 17–19 admits/s |
+>
+> **The empty panel is the result.** An auto-scaled empty panel is not evidence
+> of anything; an empty panel on an axis that reaches 1.4 errors/s is.
+>
+> Prometheus `scrape_interval` is **5 s**, so a 30 s run gives ~6 points — enough
+> for `rate(...[1m])` but visibly coarse. That is expected, not a capture fault.
+
+
+
 | Save as | Panel | Window (UTC) | What it should show |
 |---|---|---|---|
 | ⏳ `OPS-2203/grafana-errors-before.png` | 4 — DB errors by code | **2026-08-18 06:20:40Z → 06:21:19Z** (the before-run the journal quotes; the Aug 12 pool-25 arm at 05:33:00Z → 05:33:56Z also works) | The error-code breakdown by series name. Which code(s) appear is the whole question — 1205 lock-wait-timeout vs something else entirely. |

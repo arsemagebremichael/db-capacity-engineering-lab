@@ -1,0 +1,75 @@
+===============================================================================
+OPS-2204 BEFORE — restart storm timeline (2 min, 50 VUs, reproduce-OPS-2204.js)
+k6 window unix 1787035847 -> 1787035968
+Sampled every ~2s: docker stats + docker inspect.
+Columns: unix | MemUsage | MemPerc | RestartCount|ExitCode|OOMKilled|Status
+===============================================================================
+1787035847 158.7MiB / 160MiB|99.16% 0|0|false|running
+1787035850 1.18MiB / 160MiB|0.74% 1|0|false|running
+1787035853 154.9MiB / 160MiB|96.84% 1|0|false|running
+1787035856 114MiB / 160MiB|71.22% 2|0|false|running
+1787035859 160MiB / 160MiB|99.97% 2|0|false|running
+1787035862 25.49MiB / 160MiB|15.93% 3|0|false|running
+1787035866 0B / 0B|0.00% 4|137|true|restarting
+1787035870 159.9MiB / 160MiB|99.97% 4|0|false|running
+1787035873 0B / 0B|0.00% 5|137|true|restarting
+1787035875 159.8MiB / 160MiB|99.88% 5|0|false|running
+1787035879 0B / 0B|0.00% 6|137|true|restarting
+1787035881 0B / 0B|0.00% 6|137|true|restarting
+1787035883 25.04MiB / 160MiB|15.65% 6|0|false|running
+1787035886 159.8MiB / 160MiB|99.86% 6|0|false|running
+1787035889 0B / 0B|0.00% 7|137|true|restarting
+1787035892 0B / 0B|0.00% 7|137|true|restarting
+1787035894 0B / 0B|0.00% 7|137|true|restarting
+1787035896 0B / 0B|0.00% 7|137|true|restarting
+1787035898 159.8MiB / 160MiB|99.85% 7|0|false|running
+1787035901 0B / 0B|0.00% 8|137|true|restarting
+1787035903 0B / 0B|0.00% 8|137|true|restarting
+1787035906 0B / 0B|0.00% 8|137|true|restarting
+1787035908 0B / 0B|0.00% 8|137|true|restarting
+1787035910 0B / 0B|0.00% 8|137|true|restarting
+1787035912 0B / 0B|0.00% 8|137|true|restarting
+1787035914 159.9MiB / 160MiB|99.95% 8|0|false|running
+1787035918 159.8MiB / 160MiB|99.89% 8|0|false|running
+1787035921 0B / 0B|0.00% 9|133|false|restarting
+1787035923 0B / 0B|0.00% 9|133|false|restarting
+1787035925 0B / 0B|0.00% 9|133|false|restarting
+1787035927 0B / 0B|0.00% 9|133|false|restarting
+1787035929 0B / 0B|0.00% 9|133|false|restarting
+1787035931 0B / 0B|0.00% 9|133|false|restarting
+1787035933 0B / 0B|0.00% 9|133|false|restarting
+1787035935 0B / 0B|0.00% 9|133|false|restarting
+1787035937 0B / 0B|0.00% 9|133|false|restarting
+1787035939 0B / 0B|0.00% 9|133|false|restarting
+1787035941 0B / 0B|0.00% 9|133|false|restarting
+1787035943 0B / 0B|0.00% 9|133|false|restarting
+1787035945 0B / 0B|0.00% 9|133|false|restarting
+1787035947 159.9MiB / 160MiB|99.91% 9|0|false|running
+1787035950 0B / 0B|0.00% 10|137|true|restarting
+1787035953 0B / 0B|0.00% 10|137|true|restarting
+1787035955 0B / 0B|0.00% 10|137|true|restarting
+1787035957 0B / 0B|0.00% 10|137|true|restarting
+1787035959 0B / 0B|0.00% 10|137|true|restarting
+1787035961 0B / 0B|0.00% 10|137|true|restarting
+1787035963 0B / 0B|0.00% 10|137|true|restarting
+1787035965 0B / 0B|0.00% 10|137|true|restarting
+1787035967 0B / 0B|0.00% 10|137|true|restarting
+
+===============================================================================
+SUMMARY
+===============================================================================
+  RestartCount        0 -> 10  in 121 s   (a restart every ~12 s)
+  Final exit state    ExitCode=137  OOMKilled=true
+  Process starts in logs                : 11
+  'JavaScript heap out of memory' FATALs:  1
+  => 10 of 11 deaths were CGROUP OOM KILLS (SIGKILL/137), not V8 heap limit.
+     The single V8 FATAL is the exception; the kernel wins the race almost
+     every time. This is the distinction P2 named as its own killer.
+
+  k6: 1,200,251 requests, 10,002/s, 100.00% failed, 0 successes
+      data_received = 0 B   <-- not a slow service; an ABSENT one
+      med latency 0s, p90 0s = connection refused, instantly
+
+  The service was DOWN for essentially the entire 2-minute window and
+  recovered on its own once load stopped (health 200, Status=running).
+  The ticket's 'restarts over and over' is exactly right.

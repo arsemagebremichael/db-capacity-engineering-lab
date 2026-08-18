@@ -1,0 +1,29 @@
+===============================================================================
+OPS-2204 — concurrency sweep: at how many SIMULTANEOUS exports does it die?
+This is the number P2 predicted (2-3). Measured directly, one N at a time.
+Captured: 2026-08-18T06:53:59Z UTC
+===============================================================================
+
+N=1 concurrent exports
+   RestartCount  10 -> 10   (delta 0)  survived
+   mem           23.91MiB / 160MiB -> 113MiB / 160MiB
+   http codes    200 
+   exit/oom      0|false
+
+N=2 concurrent exports
+   RestartCount  10 -> 10   (delta 0)  survived
+   mem           22.32MiB / 160MiB -> 132.4MiB / 160MiB
+   http codes    200 200 
+   exit/oom      0|false
+
+N=3 concurrent exports
+   RestartCount  10 -> 11   (delta 1)  <-- DIED
+   mem           132.6MiB / 160MiB -> 26.48MiB / 160MiB
+   http codes    000 000 200 
+   exit/oom      0|false
+
+N=4 concurrent exports
+   RestartCount  11 -> 12   (delta 1)  <-- DIED
+   mem           23.78MiB / 160MiB -> 25.52MiB / 160MiB
+   http codes    000 000 000 000 
+   exit/oom      0|false

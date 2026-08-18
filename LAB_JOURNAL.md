@@ -1951,6 +1951,127 @@ attempted or verified here.**
 
 ---
 
+---
+
+## Investigation — OPS-2204 — ✅ COMPLETE
+
+*Ticket:* [Nightly export crashes the service](./incidents/OPS-2204.md)
+*Reproduce:* `k6 run load-tests/reproduce-OPS-2204.js` (50 VUs, 2 min)
+*Evidence:* [`evidence/OPS-2204/`](evidence/OPS-2204/)
+
+### Observation — the before state
+
+100,000 rows. 160 MiB cgroup cap. `NODE_OPTIONS=--max-old-space-size=256`, i.e.
+**V8 is told it may grow its heap to 256 MiB inside a 160 MiB container** — the
+mismatch is deliberate lab setup, and it is what makes the kernel, not V8, the
+thing that kills the process.
+
+| | measured |
+|---|---|
+| Export payload | **34.47 MiB** (36,141,185 bytes, 100,000 rows) |
+| Wall time, 1 VU uncontended | 0.591 s |
+| RSS for **one** export | 23.91 → **113 MiB** |
+| RSS for **two** concurrent | 22.32 → **132.4 MiB** (83% of cap) |
+| **Three concurrent** | **DIES** |
+| 50-VU storm | **RestartCount 0 → 10 in 121 s**, `ExitCode=137`, `OOMKilled=true` |
+| 50-VU storm, k6 | 1,200,251 requests, **0 successes**, **`data_received = 0 B`** |
+
+The last line is the one worth pausing on. **This is not a degradation, it is an
+absence.** Median latency 0 s and zero bytes received means connection refused —
+the service was *gone* for essentially the whole window, not slow. Every other
+incident in this lab was a brownout; this one is an outage.
+
+The mechanism is the handler, [`api/server.js`](api/server.js):
+
+```js
+const [rows] = await pool.query('SELECT * FROM patients');   // 100k row objects
+res.json({ count: rows.length, data: rows });                // + a 34.47 MiB string
+```
+
+Nothing bounds the result set, and **both full copies are live at once** — the
+materialized row objects and the `JSON.stringify` output built from them.
+
+### P2 — scored ✅ HIT, including the part it staked itself on
+
+**P2 predicted: OOM at 2–3 concurrent exports, killed by the kernel (exit 137,
+climbing `RestartCount`), NOT by V8's own heap limit.** It explicitly named its
+own killer: a graceful `JavaScript heap out of memory` (exit 134) would mean
+`--max-old-space-size=256` bound first and the mechanism was wrong.
+
+| P2 claim | Measured | |
+|---|---|---|
+| Dies at 2–3 concurrent exports | **Dies at exactly 3** (1 ✅, 2 ✅, 3 ✗) | ✅ |
+| Kernel kill, `ExitCode=137`, `OOMKilled=true` | 137, `OOMKilled=true` | ✅ |
+| `RestartCount` climbs | 0 → **10** in 121 s | ✅ |
+| Bounded by *concurrent HTTP requests*, not pool size | pool is 25, death at 3 | ✅ |
+| NOT a graceful V8 heap error | **10 of 11 deaths were cgroup kills** | ✅ mostly |
+
+**The one honest qualifier:** the logs contain **one** `FATAL ERROR: Reached heap
+limit — JavaScript heap out of memory` across 11 process starts. So V8's limit
+*can* bind — it just loses the race to the kernel roughly 10 times out of 11.
+P2 framed this as binary; it is a race, and P2 wins it 91% of the time. Scored a
+hit, with that stated rather than smoothed over.
+
+**Why the pool doesn't save it, confirmed:** the pool is 25 and the service dies
+at 3 concurrent exports. `pool.query()` releases the connection when it
+*resolves* — the 100k row objects are already in the heap by then, and
+`res.json()` builds the second copy afterwards, with no connection held at all.
+**The pool serializes query execution; it does not serialize memory residency.**
+That was P2's core reasoning and it is exactly what the data shows.
+
+### The shedder does not protect this endpoint — and that is a fourth coupling
+
+`MAX_INFLIGHT=32` (OPS-2202's fix) admits up to **32 concurrent exports**. The
+measured safe number is **2**. The shedder is calibrated in *requests*, and it is
+blind to the fact that one export costs ~89 MiB of RSS while one admit costs
+~0. **A global in-flight cap cannot protect a service whose requests differ in
+cost by four orders of magnitude** — it is sized for the cheap majority and lets
+through 16× more of the expensive minority than the budget allows.
+
+This is the same cross-incident coupling as OPS-2203, in a new form: there, 2202's
+shedder *lengthened* 2203's critical section; here, it **fails to defend** 2204 at
+all while appearing to be a protection. **Admission control that counts requests
+is not admission control for a heterogeneous workload.**
+
+### Pre-registered predictions for the fix (P7a–P7e) — written BEFORE the change
+
+The fix under test: **stream the result set instead of materializing it**, so
+peak memory is O(chunk) rather than O(rows). Measured inputs above.
+
+**P7a — peak RSS for one export becomes bounded and roughly independent of row
+count.** Currently one export costs 23.91 → 113 MiB (+89 MiB), proportional to
+the result set. Streaming should hold only a chunk plus socket buffers.
+*Prediction:* peak RSS for a single export **under 60 MiB** (band 35–60), and
+the +89 MiB delta falls **below +25 MiB**.
+*Killing artifact:* peak RSS still scaling with the 34.47 MiB payload.
+
+**P7b — the N=3 death threshold disappears.** *Prediction:* N=3 and N=4
+concurrent exports both **survive with `RestartCount` delta 0**. Stronger form:
+all **32** the shedder admits survive, since 32 × ~3 MiB ≈ 96 MiB + ~24 MiB
+baseline ≈ 120 MiB, inside 160.
+*Killing artifact:* any restart at N ≤ 32.
+
+**P7c — the 50-VU storm survives with zero restarts.** This is the headline and
+the least hedged. *Prediction:* `RestartCount` delta **exactly 0** across the
+full 2-minute run, against 10 before.
+*Killing artifact:* a single restart.
+
+**P7d — successes go from 0 to non-zero, and throughput is now bounded by
+something else.** Before: 0 successes, 0 B received. After, the export still
+costs ~0.59 s of wall time and holds a pool connection for the whole stream, so
+concurrency is capped at **25 (the pool)**, below the shedder's 32.
+*Prediction:* **≥ 500 successful exports** in 120 s, and the binding constraint
+becomes the **pool at 25**, not memory.
+*Note:* this one has a known trap — I predicted the wrong constraint in OPS-2203
+for exactly this kind of reasoning, so it is deliberately stated as a named
+constraint that can be scored wrong.
+
+**P7e — the response contract is byte-identical.** *Prediction:* still
+`{"count":100000,"data":[...]}`, still **36,141,185 bytes**. A memory fix that
+changes the payload is a different endpoint, not a fix.
+*Killing artifact:* any byte difference.
+
+
 ## Investigation — OPS-2204 — ⛔ NOT INVESTIGATED
 *Ticket:* [Nightly export crashes the service repeatedly](./incidents/OPS-2204.md)
 *Reproduce:* `k6 run load-tests/reproduce-OPS-2204.js`

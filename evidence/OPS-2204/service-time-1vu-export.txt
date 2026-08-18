@@ -1,0 +1,42 @@
+===============================================================================
+OPS-2204 — single-export cost at 1 VU (uncontended)
+Captured: 2026-08-18T06:50:20Z UTC
+100,000 rows. 160 MiB cgroup. NODE_OPTIONS=--max-old-space-size=256.
+===============================================================================
+
+--- before ---
+  process_resident_memory_bytes{app="capacity-api"}      76.25 MiB
+  nodejs_heap_size_total_bytes{app="capacity-api"}      26.17 MiB
+  nodejs_heap_size_used_bytes{app="capacity-api"}      24.18 MiB
+docker RSS: 42.92MiB / 160MiB
+
+--- one export ---
+  payload: 36,141,185 bytes = 34.47 MiB
+  wall: 0.591 s
+  rows returned: 100000
+
+--- immediately after (before GC) ---
+  process_resident_memory_bytes{app="capacity-api"}     148.00 MiB
+  nodejs_heap_size_total_bytes{app="capacity-api"}      73.80 MiB
+  nodejs_heap_size_used_bytes{app="capacity-api"}      69.36 MiB
+docker RSS: 115.1MiB / 160MiB
+
+--- restart state ---
+  RestartCount=0 ExitCode=0 OOMKilled=false
+
+===============================================================================
+DERIVED — the cost of ONE export
+===============================================================================
+  docker RSS          42.92 -> 115.10 MiB     delta +72.18 MiB
+  process_resident    76.25 -> 148.00 MiB     delta +71.75 MiB
+  heap used           24.18 ->  69.36 MiB     delta +45.18 MiB
+  heap total          26.17 ->  73.80 MiB     delta +47.63 MiB
+  response payload                34.47 MiB   (36,141,185 bytes, 100,000 rows)
+
+  ONE export costs ~72 MiB of RSS against a 160 MiB cap.
+  Heap delta (45.18) ~= row objects + the JSON string; RSS delta (72) is larger
+  because the serialized buffer is also held outside the JS heap for the write.
+
+  Headroom after baseline: 160 - 43 = 117 MiB.
+  117 / 72 = 1.6 concurrent exports before the cap is hit.
+  => the SECOND concurrent export should be enough. P2 said 2-3.

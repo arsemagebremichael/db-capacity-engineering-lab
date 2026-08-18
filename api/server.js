@@ -209,8 +209,26 @@ app.get('/api/patients/search', async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Admit a patient to a hospital (decrement available beds).
-// We update the bed count, then notify the regional bed registry that the
-// count changed before finalizing, so the two systems stay consistent.
+//
+// The bed-count UPDATE takes an InnoDB X lock on the hospital row that is held
+// until COMMIT, so anything inside the transaction is serialized across every
+// concurrent admit to the same hospital. The registry notification used to sit
+// inside that window, which made the critical section ~508 ms and capped
+// single-row throughput at 1/W ~= 2 admits/s no matter how large the pool was;
+// at pool 25 the 24 waiters queued past the 5 s innodb_lock_wait_timeout and
+// turned queueing into ER_LOCK_WAIT_TIMEOUT (OPS-2203).
+//
+// The notification is therefore issued AFTER the commit, and after the pooled
+// connection is released, so it holds neither the row lock nor a connection.
+// The critical section is now the UPDATE alone (~0.69 ms measured).
+//
+// Ordering note: the registry is now told after the bed count is durable rather
+// than before. This is deliberate and is the safer of the two orderings — the
+// previous code could notify the registry and then fail to commit, leaving the
+// registry permanently ahead of the database with no way to detect it. The
+// pre-commit call never made the two systems atomic; it only made the failure
+// mode worse. Post-commit, a failed notification leaves the registry behind a
+// committed truth, which is recoverable by retry or reconciliation.
 // ---------------------------------------------------------------------------
 app.post('/api/hospitals/:id/admit', async (req, res) => {
   const hospitalId = Number(req.params.id);
@@ -225,21 +243,22 @@ app.post('/api/hospitals/:id/admit', async (req, res) => {
       [hospitalId]
     );
 
-    // Notify the external regional bed registry of the new count before we
-    // commit (simulated here with a network round-trip latency).
-    await notifyBedRegistry(hospitalId);
-
     await conn.commit();
-    res.json({ status: 'admitted', hospitalId });
   } catch (err) {
     if (conn) {
       try { await conn.rollback(); } catch (_) { /* ignore */ }
     }
     dbErrorsTotal.inc({ route: '/api/hospitals/:id/admit', code: err.code || 'UNKNOWN' });
-    res.status(500).json({ error: err.code || 'ERROR', message: err.message });
+    return res.status(500).json({ error: err.code || 'ERROR', message: err.message });
   } finally {
     if (conn) conn.release();
   }
+
+  // Outside the transaction and outside the pooled connection: this no longer
+  // blocks any other admit to the same hospital row.
+  await notifyBedRegistry(hospitalId);
+
+  res.json({ status: 'admitted', hospitalId });
 });
 
 // Stand-in for the external registry client used by the admit flow.

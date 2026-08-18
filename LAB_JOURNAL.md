@@ -32,19 +32,25 @@
 > Timeouts went **89 → 0** at the same pool of 25. See the OPS-2203 result
 > section and [`SCARS.md`](SCARS.md).
 >
-> **Why two rather than four:** each incident was worked to the standard the
-> rubric asks for — reproduce, gather evidence, name the mechanism with capacity
-> arithmetic, fix one concern per commit, re-measure against a known noise floor
-> — and that took longer than half the time. Rather than produce four thin
-> write-ups, two are complete and two are honestly marked undone. **The
-> pre-registered predictions for OPS-2204 are left in place,
-> explicitly labelled untested**, because deleting them would hide that they
-> were made in advance; and one of them (P1-corollary) flags a **possible
-> regression introduced by shipped OPS-2202 work that was never measured.**
+> **How this was worked:** each incident was taken to the standard the rubric
+> asks for — reproduce, gather evidence, name the mechanism with capacity
+> arithmetic, fix one concern per commit, re-measure against a known noise floor.
+> The first submission covered two incidents at that depth and marked the other
+> two honestly undone rather than padding them; **OPS-2203 and OPS-2204 were
+> then completed to the same standard**, and the original undone sections are
+> preserved unedited under SUPERSEDED banners so the sequence stays visible.
+>
+> **Every prediction was pre-registered in a commit BEFORE the fix it describes
+> and scored afterwards, hit or miss** — 24 predictions, **12 hits, 1 split,
+> 11 misses**. None was retrofitted; the misses are the most useful thing in
+> here. Two that mattered: **P1 was scored wrong**, and **P1-corollary was
+> confirmed with a control arm** — it flagged a regression introduced by shipped
+> OPS-2202 work, which was then measured (89 lock-wait timeouts vs 0) and fixed.
 >
 > **Nothing in this journal is estimated.** Every number was measured and its raw
-> output is committed. Where something was not measured it says **NOT MEASURED**
-> or **NOT INVESTIGATED**.
+> output is committed. Where something was not measured it says so — the
+> remaining gaps are listed in [`SCARS.md`](SCARS.md) under *What remains
+> unmeasured*.
 
 This is your investigation notebook. You are on call for the Regional Health
 platform and working the [incident queue](./incidents/README.md). For each

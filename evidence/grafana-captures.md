@@ -21,7 +21,9 @@ recorded in each run's evidence file (`run window (unix): START -> END`), padded
 by 1 minute either side so the `[1m]` rate windows are fully populated. Relative
 windows like "last 15 minutes" drift and won't match the journal's numbers.
 
-> Timestamps are filled in as each incident is worked. Rows marked ⏳ are not yet
+> Timestamps are filled in as each incident is worked. Rows marked ⛔ are **not
+> pending** — they are inapplicable, because the run that would have produced the
+> window never happened; the reason is stated in the row. Rows marked ⏳ are not yet
 > captured because that incident hasn't run.
 
 ---
@@ -187,17 +189,17 @@ elevated during 2201 (~45 ms) and **flat at ~12–14 ms during 2202's 36× brown
 
 | Save as | Panel | Window (UTC) | What it should show |
 |---|---|---|---|
-| ⏳ `OPS-2203/grafana-errors-before.png` | 4 — DB errors by code | TBD | The error-code breakdown by series name. Which code(s) appear is the whole question — 1205 lock-wait-timeout vs something else entirely. |
-| ⏳ `OPS-2203/grafana-throughput-before.png` | 1 — Throughput by route | TBD | Admits/sec plateau. Predicted near 1/W ≈ 1.97/s from the 1-VU measurement; the panel either confirms that ceiling or refutes it. |
+| ⏳ `OPS-2203/grafana-errors-before.png` | 4 — DB errors by code | 2026-08-12 05:33:00Z → 05:33:56Z (pool-25 arm) | The error-code breakdown by series name. Which code(s) appear is the whole question — 1205 lock-wait-timeout vs something else entirely. |
+| ⏳ `OPS-2203/grafana-throughput-before.png` | 1 — Throughput by route | 2026-08-12 05:32:30Z → 05:39:10Z (both arms) | Admits/sec plateau. Predicted near 1/W ≈ 1.97/s from the 1-VU measurement; the panel either confirms that ceiling or refutes it. |
 | ⏳ `OPS-2203/grafana-throughput-after.png` | 1 — Throughput by route | TBD (post-fix) | Same axes as before. |
 
 ## OPS-2204 — nightly export crashes the service
 
 | Save as | Panel | Window (UTC) | What it should show |
 |---|---|---|---|
-| ⏳ `OPS-2204/grafana-memory-before.png` | 3 — Memory vs limit | TBD | The money shot: RSS sawtooth climbing into the 160 MB cap, each tooth ending in a vertical drop = process death + restart. Add the cap as a reference line if it isn't drawn. |
-| ⏳ `OPS-2204/grafana-throughput-before.png` | 1 — Throughput by route | TBD | Throughput of *other* routes collapsing during the export storm — proves blast radius beyond the export caller. |
-| ⏳ `OPS-2204/grafana-memory-after.png` | 3 — Memory vs limit | TBD (post-fix) | Bounded, flat memory under identical load. Same y-axis as the before shot or the comparison is meaningless. |
+| ⛔ `OPS-2204/grafana-memory-before.png` | 3 — Memory vs limit | **n/a — no such window exists** | **Not a pending capture — a correctly absent one.** `reproduce-OPS-2204.js` was never run, so no export storm was ever generated and there is no RSS sawtooth in the TSDB to photograph. Would show the sawtooth climbing into the 160 MB cap *if* the incident were ever run. |
+| ⛔ `OPS-2204/grafana-throughput-before.png` | 1 — Throughput by route | **n/a — no such window exists** | **Not a pending capture — a correctly absent one.** Same reason: no export storm was ever generated. Would show other routes collapsing during the storm *if* the incident were ever run. |
+| ⛔ `OPS-2204/grafana-memory-after.png` | 3 — Memory vs limit | **n/a — no fix, no before shot** | **Not a pending capture — a correctly absent one.** There is no OPS-2204 fix and no before shot to compare against. |
 
 ---
 

@@ -1467,7 +1467,7 @@ what a 1205 *is*.
 was not protecting the database by being small — it was **rationing access to a
 serialized resource**. Admits to one hospital row are serialized by an X row
 lock held for the duration of the transaction, which includes the 500 ms
-`notifyBedRegistry` call ([`api/server.js:133`](api/server.js#L133)). Throughput
+`notifyBedRegistry` call ([`api/server.js:230`](api/server.js#L230), inside the transaction spanning [`215-243`](api/server.js#L215-L243)). Throughput
 on that row is bounded by `1/W_lock` ≈ 2 admits/s **no matter how many
 connections exist**. Adding connections adds *waiters*, not throughput — and
 once the queue of waiters is deep enough that the last one waits longer than

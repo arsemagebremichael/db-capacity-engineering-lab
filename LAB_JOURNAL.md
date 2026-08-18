@@ -1783,8 +1783,14 @@ resumption queues behind the saturated loop and pays the lag:
   hold derived from throughput = 1 / 19.8 admits/s      ~= 50.5 ms   AGREES
 ```
 
-A control fell out of the confirmation run by accident. The probe connection
-runs in a **separate** node process whose event loop is idle:
+**A clean control fell out of the confirmation run by luck, and I want that on
+the record rather than dressed up as design.** I ran the probe from
+`docker compose exec capacity-api node -e` purely because it was the quickest way
+to get a connection, without noticing that it spawns a **separate node process
+with its own idle event loop**. That accident is the only reason the app-side and
+DB-side costs can be separated at all. Had I run the probe inside the API
+process, it would have paid the same lag and I would have concluded the database
+was slow under load:
 
 | | hold |
 |---|---:|
@@ -1792,9 +1798,17 @@ runs in a **separate** node process whose event loop is idle:
 | DB-side, idle loop, idle DB (pre-fix bench) | 0.690 ms |
 | **API-side, saturated loop, under load** (derived) | **50.5 ms** |
 
-**The database is not degraded under load at all.** The entire 54× gap is
-app-side. The row lock is held across JavaScript scheduling delay, not database
-work.
+**The database was never degraded, at any point in this incident.** Under full
+load it served the probe's transaction in 0.94 ms against 0.690 ms idle — a 36%
+difference, well inside noise. The entire 54× gap is app-side: the row lock is
+held across JavaScript scheduling delay, not database work.
+
+This is worth stating outright because **the ticket blamed the database**
+("admissions failing with database errors"), and the error code was a genuine
+MySQL 1205, which corroborates the blame. Both were true and both were
+misleading. MySQL reported the timeout accurately; it was reporting on a lock
+that *Node* was holding open. **The database was the messenger for all four
+incidents in this lab and the culprit in none of them.**
 
 And the loop is saturated by **466k shed requests per run** — which the shedder
 itself generates. **OPS-2202's admission control is paying for OPS-2203's
@@ -1849,6 +1863,32 @@ established:
 
 **Not changed without measuring, per the plan.** The pool stays at 25 and no
 config was touched in this step.
+
+### The margin is thin, and it is no longer a fixed property — monitor it
+
+The 4.1× margin deserves a watch item rather than a tick. Before the fix the
+crossover was set by a **constant**: a hardcoded 500 ms sleep, the same at any
+load. After the fix it is set by **event-loop lag**, which is a *function of
+offered load* — 12.1 ms idle, 29.4 ms at 500 VUs. So:
+
+```
+crossover N ~= 1 + 5000 / (0.7 + 2 x lag_ms)
+
+  lag 12 ms (idle)      ->  N ~= 200
+  lag 29 ms (500 VUs)   ->  N ~= 100     <- measured here
+  lag 50 ms             ->  N ~=  50
+  lag 104 ms            ->  N ~=  25     <- pool 25 starts timing out again
+```
+
+**The margin erodes as traffic grows, with nobody touching a config file.** At
+roughly 3.5× the event-loop lag measured here, pool 25 re-crosses its own
+timeout and OPS-2203 comes back — no deploy, no config change, just more load.
+That is a materially worse property than the constant it replaced, and it is the
+honest cost of this fix.
+
+*Watch:* `nodejs_eventloop_lag_mean_seconds` **> 50 ms** on the admit path is the
+leading indicator; `Innodb_row_lock_time_avg` climbing is the lagging one. The
+fix bought headroom, not immunity.
 
 ### Where throughput would actually come from
 
@@ -2052,6 +2092,62 @@ is more informative than any individual result. Updated as each incident closes.
 | P4d | Error *rate* stays ~99.7%; served p95 falls ~20× to ~0.51 s | ⚠️ **Split** — rate ✅ 99.86%; p95 ❌ 2.39 s (4.7× high) | Same root cause as P4c |
 | P4e | Pool-25 regression closed by the fix, no revert needed | ✅ **Hit** — 0 timeouts at pool 25, no revert | Margin is **4.1×**, not the 290× claimed — the hit is on the call, not the arithmetic |
 | P2 | 2204 OOMs at 2–3 concurrent exports; exit 137 | ⏳ pending 2204 | — |
+
+### The incidents are not independent — one incident's FIX is a term in another's failure equation
+
+This is the strongest evidence in the lab that these four tickets were never
+four bugs, and it is a stronger claim than the coupling I argued for earlier.
+The earlier version was that the tickets *share a mechanism* (a saturated JS
+thread). This is different and worse: **a fix shipped for one incident appears
+as a quantitative term inside another incident's critical section.**
+
+The chain, every link measured:
+
+```
+OPS-2202's fix        MAX_INFLIGHT=32 admission control
+       |                shed requests are CHEAP but not free
+       v
+  466,000 shed requests per 30 s run, all rejected on the same JS thread
+       |
+       v
+  nodejs_eventloop_lag_mean   12.1 ms idle  ->  29.4 ms under load   (2.4x)
+       |                        lag is paid on every await resumption
+       v
+OPS-2203's transaction   BEGIN -> UPDATE -> [await] -> COMMIT -> [await]
+       |                 the InnoDB X row lock is held across BOTH
+       v
+  lock hold   0.690 ms (idle)  ->  ~50 ms (under load)               (73x)
+       |
+       v
+  crossover N   ~7,250 (predicted from idle)  ->  ~100 (real)        (72x error)
+```
+
+**OPS-2202's admission control is inside OPS-2203's critical section.** Not
+adjacent to it, not a shared dependency — *inside* it, as a multiplier on the
+lock hold. The shedder protects the service by converting excess load into cheap
+rejections, and those rejections are the thing lengthening the lock that OPS-2203
+is about.
+
+Three consequences that do not follow from "they share a root cause":
+
+1. **The fixes are not independently valuable and cannot be independently
+   verified.** Measuring OPS-2203's fix with the shedder disabled would give a
+   different — and better — answer than the one that ships. Neither number is
+   wrong; they are answers to different questions. Every capacity result in this
+   lab is conditional on the *other* incidents' configuration.
+2. **Fixing OPS-2202 harder makes OPS-2203 worse.** Lowering `MAX_INFLIGHT`
+   sheds more, which raises lag, which lengthens the lock hold, which lowers the
+   crossover. There is a real optimum and I did not find it. **Not measured.**
+3. **The ordering of the four tickets changed their content.** OPS-2202's pool
+   raise *created* the OPS-2203 failure (P1-corollary, confirmed with a control
+   arm), and OPS-2202's shedder then *inflated* it. Had 2203 been worked first,
+   it would have been a different incident with different numbers.
+
+**The transferable claim:** in a system where work is serialized on one thread,
+admission control is not free and is not isolated. It converts rejected work into
+latency paid by *accepted* work — and if any accepted work holds a lock across an
+await, the rejections are inside the lock. **Cheap rejection is still rejection
+done somewhere, by something, that something else is waiting on.**
 
 ### The shipped gates failed three different ways for one reason
 

@@ -2538,17 +2538,71 @@ It wins on three independent counts, and the third is the decisive one:
 1. **Largest measured improvement in the lab**, by two orders of magnitude.
 2. **Only fix that repaired an endpoint it did not modify** — the bystander
    recovery is proof it removed a *shared-resource* starvation, not a local one.
-3. **It is also the largest available mitigation for the incident I ranked #1
-   for blast radius.** Freeing 102 MiB against a 160 MB cap roughly **triples**
-   the headroom available to the export, without touching the export. Nothing
-   else on the list buys memory: the index costs a B-tree, the pool raise is
-   neutral, clustering *consumes* 40+ MiB per worker.
+3. ~~**It is also the largest available mitigation for the incident I ranked #1
+   for blast radius.** Freeing 102 MiB against a 160 MB cap roughly triples the
+   headroom available to the export, without touching the export.~~
+   **❌ FALSIFIED by measurement — see the revision below.**
 
 Runner-up, and why it loses: **admission control** is the only change that makes
 overload *visible* to existing alerting (0.00% → 93.6% error rate), and I'd ship
 it second. But it costs **82% of throughput** under a non-backing-off client and
 raises no ceiling. Before a launch, the fix that removes the problem beats the
 fix that reports it.
+
+### ⚠️ REVISION after OPS-2204 was actually measured — the answer changed
+
+**The call above was made when OPS-2203 and OPS-2204 were unmeasured. Two of its
+three pillars survive contact with the evidence. The one I called decisive does
+not.**
+
+**What was falsified.** Pillar 3 claimed pagination's 102 MiB was the largest
+available mitigation for OPS-2204. That is arithmetic I could have checked and
+did not:
+
+```
+                     baseline    headroom    concurrent exports survived
+pre-pagination        148.7 MiB    11.3 MiB    0.1
+post-pagination        46.5 MiB   113.5 MiB    1.3      <- "triples the headroom"
+
+the nightly job runs 50 concurrent; the service dies at 3
+3 concurrent exports need 3 x 89 MiB = 267 MiB
+available even AFTER pagination                = 113.5 MiB
+shortfall                                      = 154 MiB   -> STILL DIES
+```
+
+**Pagination moves the death threshold from ~1 concurrent export to ~2. The
+nightly job runs 50.** It does not prevent the outage, it postpones it by one
+caller. "Triples the headroom" was true and irrelevant — OPS-2204 needed a **35×**
+reduction in per-export cost, and I offered it a 10× increase in headroom
+against a load 16× over the line.
+
+**The revised answer: ship OPS-2204's streaming export (`c87b91c`).**
+
+The frame that decides it is *which omission leaves the worse system*, and the
+measurements now make that one-sided:
+
+| omit | result |
+|---|---|
+| pagination | search degrades — 34 req/s, p95 7 s. **A brownout. The service is up.** |
+| **streaming** | **the service dies.** 1,200,251 requests, **0** successes, `data_received = 0 B`, `RestartCount` 0→10 in 121 s, every other endpoint down with it |
+
+OPS-2204 is the only incident in this lab whose failure mode is **total
+unavailability** rather than degradation, and streaming is the only fix that
+prevents it — measured 0 → 356 successful exports, 10 → 0 restarts, and survival
+at all 32 concurrent callers the shedder admits. **Availability beats latency:
+a slow service is a service; a dead one is not.**
+
+Pagination is now the runner-up, and it is a close and genuine one — it remains
+the largest single improvement in the lab (124.6×), the only fix that repaired an
+endpoint it did not touch, and it helps every shift change rather than one batch
+window. If the launch window contains no export run, it goes first. **But the
+export is nightly and launches are not, so it does not get to be the assumption.**
+
+**The lesson is the one this lab keeps teaching:** I ranked OPS-2204 #1 for blast
+radius *before* measuring it, and was right; then argued another fix could cover
+it, and was wrong. **A correct ranking does not survive being used as an excuse
+to skip the work.** The arithmetic that falsified pillar 3 took one line and was
+available the whole time.
 
 ### Detector — what would have caught these before a ticket was filed
 

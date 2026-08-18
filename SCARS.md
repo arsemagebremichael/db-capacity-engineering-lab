@@ -3,10 +3,10 @@
 Read this at 2am. Every number here was measured; raw output is in
 [`evidence/`](./evidence/). Full working in [`LAB_JOURNAL.md`](./LAB_JOURNAL.md).
 
-**Scope:** OPS-2201 and OPS-2202 were investigated and fixed. **OPS-2203 was
-touched only as a regression test of my own shipped work** (scar OPS-2202-R) —
-its root cause was not investigated. OPS-2204 was not worked at all. See
-[Not investigated](#not-investigated).
+**Scope:** OPS-2201, OPS-2202 and **OPS-2203** were investigated and fixed.
+OPS-2204 was not worked at all. See [Not investigated](#not-investigated).
+Scar OPS-2202-R below records a regression this submission introduced; scar
+**OPS-2203** records the fix that closed it.
 
 > ⚠️ **Read scar OPS-2202-R first if you are deploying this.** It documents a
 > live regression introduced by a fix in this submission: `ER_LOCK_WAIT_TIMEOUT`
@@ -86,16 +86,27 @@ Both produced clean-looking tables while measuring nothing.
   **Alert that would have caught it:** `db_errors_total{code="ER_LOCK_WAIT_TIMEOUT"} > 0` — it fires cleanly here and would have fired on the first deploy. Notably this is the *only* incident in this lab where error-rate alerting works, because it is the only one where the system fails rather than degrades.
 - **Evidence:** [`evidence/OPS-2203-partial/`](./evidence/OPS-2203-partial/) — `k6-pool25.txt`, `k6-pool2-control.txt`, `innodb-status.txt` (TRANSACTIONS verbatim), `error-code-breakdown.txt`.
 
-> **Decision required — revert or not.** Recommended: **revert the default to
-> `MYSQL_POOL_SIZE=8`** (one line, [`api/database.js:38`](./api/database.js#L38)),
-> because (a) pool=2 is *measured* to produce zero timeouts, (b) OPS-2202's A/B
-> measured the raise as worth **+1.0%, i.e. nothing**, so reverting costs no
-> measured throughput, and (c) 8 stays under the N≈11 crossover while keeping
-> headroom above the original 2. **Not done here** because it is a behaviour
-> change that could not be re-verified against all four endpoints in the time
-> left. **The real fix is not the pool size** — it is moving the 500 ms
-> `notifyBedRegistry` call out of the transaction, shrinking the critical section
-> from ~508 ms to one `UPDATE`. That is an OPS-2203 fix and was not attempted.
+> **✅ RESOLVED — and NOT by reverting.** The revert to `MYSQL_POOL_SIZE=8` was
+> recommended here and **was not carried out, because it treated the symptom.**
+> The 500 ms `notifyBedRegistry` call was moved out of the transaction instead
+> (`d10f8b6`), which shrank the critical section **508.86 ms → 0.690 ms** and
+> took timeouts **89 → 0 at the unchanged pool of 25**, while admits rose
+> **2.30 → 19.80/s**. The pool raise needed no revert: it was never the defect,
+> only the thing that exposed it. See scar **OPS-2203** below.
+
+---
+
+## ✅ OPS-2203 — 500 ms of network call inside a row lock
+
+- **S — Symptom:** `POST /api/hospitals/:id/admit`, 500 concurrent admits to one hospital: **89 HTTP 500s carrying `ER_LOCK_WAIT_TIMEOUT` (MySQL 1205)**, only **69** admits succeeding — **2.30 admits/s**. Served requests took **p95 10.06 s**. The endpoint's own k6 gate, `p(95)<1000`, **PASSED at 42.49 ms** while 99.98% of requests failed.
+- **C — Cause:** The bed-count `UPDATE` takes an InnoDB **X row lock held until `COMMIT`**, and a **500 ms `notifyBedRegistry` network call sat inside that window** ([`api/server.js:230`](./api/server.js#L230), txn spanning [`215-243`](./api/server.js#L215-L243)). Every concurrent admit to the same hospital serialized on it, so single-row throughput was `1/W_lock` ≈ **2 admits/s regardless of pool size**. At the pool of 25, `data_locks` showed **1 holder + 24 waiters**; the deepest wait `24 × 0.5 s = 12 s` exceeded the 5 s `innodb_lock_wait_timeout`. **Queueing became failing.**
+- **A — Action:** Moved `notifyBedRegistry` **after `COMMIT` and after the connection is released** (`d10f8b6`), so it holds neither the row lock nor a pool connection. One concern, one commit. **The pool was NOT changed** — it stayed at 25.
+- **R — Result:** **`ER_LOCK_WAIT_TIMEOUT` 89 → 0** (the `db_errors_total` series no longer exists). Admits **69 → 594** (**8.61×**), **2.30 → 19.80 admits/s**. Served p95 **10.06 s → 2.39 s** (−76%, outside the ±25% admissible band). Critical section **508.86 ms → 0.690 ms** measured. Reproduced: a second run gave 607 admits vs 594, 2.2% apart.
+- **Scar / lesson — the one worth reading at 2am:** **the fix did not remove the serialization, and the row-lock queue is still there — 20 waiters after the fix, not zero.** What changed is that the queue stopped outliving the timeout. More importantly, **the critical section still contains something that is not database work: event-loop lag.** Under load `nodejs_eventloop_lag_mean` goes 12.1 → 29.4 ms, and the transaction awaits twice after `BEGIN`, so the lock is held for `UPDATE + lag + COMMIT + lag` ≈ **50 ms**, not the 0.690 ms measured on an idle loop — a **73× inflation**, confirmed two ways (derived from throughput, and by a probe connection in a *separate, unsaturated* node process that saw only 0.94 ms). **The effective crossover is therefore N ≈ 100, not the ≈ 7,250 the idle number predicts.** Pool 25 is safe with a **4.1× margin, not 290×.**
+  **And the loop is saturated by 466k shed requests per run — which OPS-2202's own admission control generates. One incident's fix is inside another incident's critical section.**
+  **Rule this cost me:** *any duration used in a capacity prediction must be measured under the load the prediction is about.* The 0.690 ms was honest, reproducible, and irrelevant — it made two pre-registered predictions (P4a, P4c) miss by 72× and 3.2×.
+  **Alert that would have caught it:** `db_errors_total{code="ER_LOCK_WAIT_TIMEOUT"} > 0`. **The alert that would NOT:** the shipped `p(95)<1000` gate, which was pushed the *right way* by the failure — 450k shed requests returning in ~0.5 ms drag the aggregate p95 down, so the worse the incident got, the healthier the gate looked. **Never gate on an aggregate over mixed outcomes.**
+- **Evidence:** [`evidence/OPS-2203/`](./evidence/OPS-2203/) — `k6-before.txt`, `k6-after.txt`, `innodb-status-before.txt` / `-after.txt` (TRANSACTIONS verbatim), `error-code-breakdown.txt` / `-after.txt`, `under-load-mechanism.txt`. Predictions pre-registered in `f8a27de` **before** the fix and scored in [`LAB_JOURNAL.md`](./LAB_JOURNAL.md): **2 hits, 1 split, 2 misses.**
 
 ---
 
@@ -104,11 +115,12 @@ Both produced clean-looking tables while measuring nothing.
 **OPS-2204 (nightly export) was not worked at all.** No reproduction was run, no
 fix attempted.
 
-**OPS-2203 was only partially touched** — `reproduce-OPS-2203.js` was run twice,
-but solely as a **regression test of my own shipped pool change** (scar
-OPS-2202-R above). The incident's actual root cause, its capacity math, its
-failure signature at the original pool size (P1), and any fix were **NOT
-investigated.** Predictions for both were pre-registered
+**OPS-2203 has since been investigated and fixed** (scar OPS-2203 below): root
+cause found, capacity math derived and measured, fix shipped and verified.
+**Two things about it remain NOT measured, and are not claimed:** its failure
+signature at the original pool of 2 (P1 — never characterised, scored *wrong*
+on its main claim), and **blast radius — no bystander route was probed during
+either run**, so the "bounded in scope" claim is asserted, not demonstrated. Predictions for both were pre-registered
 in [`LAB_JOURNAL.md`](./LAB_JOURNAL.md) **before** the deadline and are left
 standing as **untested** — they are hypotheses, not findings.
 

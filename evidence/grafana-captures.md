@@ -189,9 +189,10 @@ elevated during 2201 (~45 ms) and **flat at ~12–14 ms during 2202's 36× brown
 
 | Save as | Panel | Window (UTC) | What it should show |
 |---|---|---|---|
-| ⏳ `OPS-2203/grafana-errors-before.png` | 4 — DB errors by code | 2026-08-12 05:33:00Z → 05:33:56Z (pool-25 arm) | The error-code breakdown by series name. Which code(s) appear is the whole question — 1205 lock-wait-timeout vs something else entirely. |
+| ⏳ `OPS-2203/grafana-errors-before.png` | 4 — DB errors by code | **2026-08-18 06:20:40Z → 06:21:19Z** (the before-run the journal quotes; the Aug 12 pool-25 arm at 05:33:00Z → 05:33:56Z also works) | The error-code breakdown by series name. Which code(s) appear is the whole question — 1205 lock-wait-timeout vs something else entirely. |
 | ⏳ `OPS-2203/grafana-throughput-before.png` | 1 — Throughput by route | 2026-08-12 05:32:30Z → 05:39:10Z (both arms) | Admits/sec plateau. Predicted near 1/W ≈ 1.97/s from the 1-VU measurement; the panel either confirms that ceiling or refutes it. |
-| ⏳ `OPS-2203/grafana-throughput-after.png` | 1 — Throughput by route | TBD (post-fix) | Same axes as before. |
+| ⏳ `OPS-2203/grafana-throughput-after.png` | 1 — Throughput by route | 2026-08-18 06:30:26Z → 06:30:57Z (post-fix) | Same axes as the before shot. Admits plateau lifts 2.30 → 19.80/s; the `db_errors_total` series **disappears entirely**. |
+| ⏳ `OPS-2203/grafana-errors-after.png` | 4 — DB errors by code | 2026-08-18 06:30:26Z → 06:30:57Z (post-fix) | The empty panel is the result: no `ER_LOCK_WAIT_TIMEOUT` series exists after the fix. Same y-axis as the before shot or it proves nothing. |
 
 ## OPS-2204 — nightly export crashes the service
 

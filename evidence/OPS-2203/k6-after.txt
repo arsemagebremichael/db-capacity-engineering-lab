@@ -1,0 +1,160 @@
+===============================================================================
+OPS-2203 AFTER — notifyBedRegistry moved OUT of the transaction
+IDENTICAL script, VUs and duration to k6-before.txt: 500 VUs, 30s.
+TREATMENT VERIFIED in the running container (docker compose exec):
+  server.js admit handler: commit() then release() then notifyBedRegistry()
+  MYSQL_POOL_SIZE=25   MAX_INFLIGHT=32   WORKERS=1   (all unchanged from before)
+Fix commit: d10f8b6. Predictions pre-registered in f8a27de BEFORE this run.
+Measured new critical section: 0.690 ms avg (was 508.86 ms) — 738x smaller
+Started: 2026-08-18T06:30:26Z UTC (unix 1787034626)
+===============================================================================
+
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: load-tests/reproduce-OPS-2203.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 500 max VUs, 1m0s max duration (incl. graceful stop):
+              * admissions_surge: 500 looping VUs for 30s (gracefulStop: 30s)
+
+
+running (0m01.0s), 500/500 VUs, 12700 complete and 0 interrupted iterations
+admissions_surge   [   3% ] 500 VUs  01.0s/30s
+
+running (0m02.0s), 500/500 VUs, 28614 complete and 0 interrupted iterations
+admissions_surge   [   7% ] 500 VUs  02.0s/30s
+
+running (0m03.0s), 500/500 VUs, 42561 complete and 0 interrupted iterations
+admissions_surge   [  10% ] 500 VUs  03.0s/30s
+
+running (0m04.0s), 500/500 VUs, 54820 complete and 0 interrupted iterations
+admissions_surge   [  13% ] 500 VUs  04.0s/30s
+
+running (0m05.0s), 500/500 VUs, 70819 complete and 0 interrupted iterations
+admissions_surge   [  17% ] 500 VUs  05.0s/30s
+
+running (0m06.0s), 500/500 VUs, 86807 complete and 0 interrupted iterations
+admissions_surge   [  20% ] 500 VUs  06.0s/30s
+
+running (0m07.0s), 500/500 VUs, 101206 complete and 0 interrupted iterations
+admissions_surge   [  23% ] 500 VUs  07.0s/30s
+
+running (0m08.0s), 500/500 VUs, 114220 complete and 0 interrupted iterations
+admissions_surge   [  27% ] 500 VUs  08.0s/30s
+
+running (0m09.0s), 500/500 VUs, 123396 complete and 0 interrupted iterations
+admissions_surge   [  30% ] 500 VUs  09.0s/30s
+
+running (0m10.0s), 500/500 VUs, 135043 complete and 0 interrupted iterations
+admissions_surge   [  33% ] 500 VUs  10.0s/30s
+
+running (0m11.0s), 500/500 VUs, 149993 complete and 0 interrupted iterations
+admissions_surge   [  37% ] 500 VUs  11.0s/30s
+
+running (0m12.0s), 500/500 VUs, 166373 complete and 0 interrupted iterations
+admissions_surge   [  40% ] 500 VUs  12.0s/30s
+
+running (0m13.0s), 500/500 VUs, 182468 complete and 0 interrupted iterations
+admissions_surge   [  43% ] 500 VUs  13.0s/30s
+
+running (0m14.0s), 500/500 VUs, 198584 complete and 0 interrupted iterations
+admissions_surge   [  47% ] 500 VUs  14.0s/30s
+
+running (0m15.0s), 500/500 VUs, 214648 complete and 0 interrupted iterations
+admissions_surge   [  50% ] 500 VUs  15.0s/30s
+
+running (0m16.0s), 500/500 VUs, 229801 complete and 0 interrupted iterations
+admissions_surge   [  53% ] 500 VUs  16.0s/30s
+
+running (0m17.0s), 500/500 VUs, 245922 complete and 0 interrupted iterations
+admissions_surge   [  57% ] 500 VUs  17.0s/30s
+
+running (0m18.0s), 500/500 VUs, 260937 complete and 0 interrupted iterations
+admissions_surge   [  60% ] 500 VUs  18.0s/30s
+
+running (0m19.0s), 500/500 VUs, 276223 complete and 0 interrupted iterations
+admissions_surge   [  63% ] 500 VUs  19.0s/30s
+
+running (0m20.0s), 500/500 VUs, 292017 complete and 0 interrupted iterations
+admissions_surge   [  67% ] 500 VUs  20.0s/30s
+
+running (0m21.0s), 500/500 VUs, 308026 complete and 0 interrupted iterations
+admissions_surge   [  70% ] 500 VUs  21.0s/30s
+
+running (0m22.0s), 500/500 VUs, 324223 complete and 0 interrupted iterations
+admissions_surge   [  73% ] 500 VUs  22.0s/30s
+
+running (0m23.0s), 500/500 VUs, 339947 complete and 0 interrupted iterations
+admissions_surge   [  77% ] 500 VUs  23.0s/30s
+
+running (0m24.0s), 500/500 VUs, 355898 complete and 0 interrupted iterations
+admissions_surge   [  80% ] 500 VUs  24.0s/30s
+
+running (0m25.0s), 500/500 VUs, 371806 complete and 0 interrupted iterations
+admissions_surge   [  83% ] 500 VUs  25.0s/30s
+
+running (0m26.0s), 500/500 VUs, 387849 complete and 0 interrupted iterations
+admissions_surge   [  87% ] 500 VUs  26.0s/30s
+
+running (0m27.0s), 500/500 VUs, 403689 complete and 0 interrupted iterations
+admissions_surge   [  90% ] 500 VUs  27.0s/30s
+
+running (0m28.0s), 500/500 VUs, 418596 complete and 0 interrupted iterations
+admissions_surge   [  93% ] 500 VUs  28.0s/30s
+
+running (0m29.0s), 500/500 VUs, 434289 complete and 0 interrupted iterations
+admissions_surge   [  97% ] 500 VUs  29.0s/30s
+
+running (0m30.0s), 500/500 VUs, 449952 complete and 0 interrupted iterations
+admissions_surge   [ 100% ] 500 VUs  30.0s/30s
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<1000' p(95)=41.02ms
+
+    http_req_failed
+    ✗ 'rate<0.05' rate=99.86%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 450761 14757.849167/s
+    checks_succeeded...: 0.13%  594 out of 450761
+    checks_failed......: 99.86% 450167 out of 450761
+
+    ✗ status is 200
+      ↳  0% — ✓ 594 / ✗ 450167
+
+    HTTP
+    http_req_duration..............: avg=33.26ms min=639µs    med=28.77ms max=7.43s p(90)=35.12ms p(95)=41.02ms
+      { expected_response:true }...: avg=1.66s   min=554.12ms med=1.88s   max=2.94s p(90)=2s      p(95)=2.39s  
+    http_req_failed................: 99.86% 450167 out of 450761
+    http_reqs......................: 450761 14757.849167/s
+
+    EXECUTION
+    iteration_duration.............: avg=33.31ms min=680.12µs med=28.79ms max=7.49s p(90)=35.15ms p(95)=41.03ms
+    iterations.....................: 450761 14757.849167/s
+    vus............................: 500    min=500              max=500
+    vus_max........................: 500    min=500              max=500
+
+    NETWORK
+    data_received..................: 151 MB 5.0 MB/s
+    data_sent......................: 65 MB  2.1 MB/s
+
+
+
+
+running (0m30.5s), 000/500 VUs, 450761 complete and 0 interrupted iterations
+admissions_surge ✓ [ 100% ] 500 VUs  30s
+time="2026-08-18T09:30:57+03:00" level=error msg="thresholds on metrics 'http_req_failed' have been crossed"
+
+run window (unix): 1787034626 -> 1787034657

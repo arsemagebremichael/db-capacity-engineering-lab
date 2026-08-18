@@ -1,0 +1,64 @@
+===============================================================================
+OPS-2203 AFTER — error-code breakdown
+k6 window unix 1787034626 -> 1787034657. IDENTICAL script/VUs/duration.
+===============================================================================
+
+NOTE ON METHOD: capacity-api was recreated for the fix, so counters restarted at
+zero. One smoke-test admit was issued before the run and is subtracted below.
+As in the before-run, exact counters are quoted rather than increase().
+
+########## db_errors_total by code ##########
+  *** THE SERIES DOES NOT EXIST. ZERO DB ERRORS OF ANY CODE. ***
+
+########## http_requests_total by status_code ##########
+  http_requests_total{method="POST",route="/api/hospitals/:id/admit",status_code="200",app="capacity-api"} 595
+  http_requests_total{method="POST",route="/api/hospitals/1/admit",status_code="503",app="capacity-api"} 450167
+
+########## in-flight gauge at mid-run ##########
+  http_requests_in_flight = 32   (pinned at MAX_INFLIGHT=32)
+
+===============================================================================
+RECONCILIATION
+===============================================================================
+  503 shed by MAX_INFLIGHT                         : 450,167   99.8682%
+  500 ER_LOCK_WAIT_TIMEOUT                         :       0    0.0000%
+  200 admitted (595 counter - 1 smoke test)        :     594    0.1318%
+                                                     ---------
+  TOTAL                                            : 450,761
+  k6 http_reqs                                     : 450,761   <-- exact match
+  k6 checks_succeeded                              :     594   <-- exact match
+
+===============================================================================
+BEFORE vs AFTER
+===============================================================================
+  metric                          before        after        delta     admissible?
+  ------------------------------------------------------------------------------
+  ER_LOCK_WAIT_TIMEOUT                89            0        -100%     mechanism ✅
+  admitted (200)                      69          594       +761%      throughput ✅
+  admits/sec                        2.30        19.80       8.61x      throughput ✅
+  reached transaction                158          594       +276%      mechanism ✅
+  503 shed                       426,050      450,167        +5.7%     throughput ✅
+  http_req_failed                 99.98%       99.86%        -0.12pp   -
+  served p95 (expected_response)   10.06 s      2.39 s       -76.2%    ✅ outside +/-25%
+  served avg                        8.03 s      1.66 s       -79.3%    ✅
+  OVERALL p95 (all outcomes)       42.49 ms    41.02 ms       -3.5%    ❌ WITHIN NOISE
+                                                                       and meaningless
+                                                                       (see gates note)
+  p99                                  -            -           -      ❌ INADMISSIBLE
+                                                                       (98.5% baseline
+                                                                       spread)
+
+===============================================================================
+INNODB STATE — the mechanism, before vs after (mid-run samples)
+===============================================================================
+                                    before        after
+  RECORD X GRANTED                       1            1
+  RECORD X WAITING                      24           20
+  IX table locks                        25           21
+  Innodb_row_lock_current_waits         24           22
+  ER_LOCK_WAIT_TIMEOUT produced         89            0
+
+  The row-lock QUEUE STILL EXISTS after the fix -- 20 waiters, not zero. What
+  changed is that the queue no longer outlives the 5 s timeout. This is the
+  central result: the fix did not remove the serialization, it made the
+  serialized section short enough that queueing stopped becoming failing.

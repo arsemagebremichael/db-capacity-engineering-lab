@@ -1,0 +1,371 @@
+===============================================================================
+OPS-2203 AFTER — InnoDB state captured INSIDE the k6 window
+Capture time: 2026-08-18T06:30:41Z UTC (unix 1787034641)
+Same capture procedure and same offsets as innodb-status-before.txt.
+===============================================================================
+
+########## SHOW ENGINE INNODB STATUS — TRANSACTIONS section (verbatim) ##########
+TRANSACTIONS
+------------
+Trx id counter 4723
+Purge done for trx's n:o < 4720 undo n:o < 0 state: running but idle
+History list length 3
+LIST OF TRANSACTIONS FOR EACH SESSION:
+---TRANSACTION 562948187589568, not started
+0 lock struct(s), heap size 1128, 0 row lock(s)
+---TRANSACTION 562948187584720, not started
+0 lock struct(s), heap size 1128, 0 row lock(s)
+---TRANSACTION 562948187583912, not started
+0 lock struct(s), heap size 1128, 0 row lock(s)
+---TRANSACTION 562948187573408, not started
+0 lock struct(s), heap size 1128, 0 row lock(s)
+---TRANSACTION 562948187568560, not started
+0 lock struct(s), heap size 1128, 0 row lock(s)
+---TRANSACTION 562948187567752, not started
+0 lock struct(s), heap size 1128, 0 row lock(s)
+---TRANSACTION 4722, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 242, OS thread handle 281471147028224, query id 3822 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4722 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4720, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 260, OS thread handle 281471149264640, query id 3819 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4720 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4718, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 263, OS thread handle 281471143673600, query id 3817 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4718 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4716, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 256, OS thread handle 281473031786240, query id 3813 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4716 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4714, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 255, OS thread handle 281472293572352, query id 3810 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4714 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4712, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 254, OS thread handle 281471139200768, query id 3807 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4712 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4710, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 264, OS thread handle 281471148146432, query id 3804 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4710 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4708, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 244, OS thread handle 281471142555392, query id 3801 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4708 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4706, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 270, OS thread handle 281472300281600, query id 3798 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 0 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4706 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4704, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 269, OS thread handle 281472697409280, query id 3795 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4704 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4702, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 241, OS thread handle 281471145910016, query id 3792 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4702 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4700, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 257, OS thread handle 281471150382848, query id 3789 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4700 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4699, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 243, OS thread handle 281472698527488, query id 3788 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4699 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4697, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 273, OS thread handle 281472299163392, query id 3784 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4697 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4694, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 267, OS thread handle 281471136964352, query id 3780 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4694 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4692, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 271, OS thread handle 281471138082560, query id 3777 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4692 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4690, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 262, OS thread handle 281471141437184, query id 3774 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4690 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4688, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 253, OS thread handle 281472696291072, query id 3771 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4688 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4686, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 246, OS thread handle 281472295808768, query id 3768 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4686 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4684, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 235, OS thread handle 281471151501056, query id 3765 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4684 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4682, ACTIVE 1 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 2 lock struct(s), heap size 1128, 1 row lock(s)
+MySQL thread id 265, OS thread handle 281472298045184, query id 3762 172.23.0.2 root updating
+UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = 1
+------- TRX HAS BEEN WAITING 1 SEC FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 3 page no 4 n bits 72 index PRIMARY of table `capacity_lab`.`hospitals` trx id 4682 lock_mode X locks rec but not gap waiting
+Record lock, heap no 2 PHYSICAL RECORD: n_fields 5; compact format; info bits 0
+ 0: len 4; hex 80000001; asc     ;;
+ 1: len 6; hex 000000001248; asc      H;;
+ 2: len 7; hex 02000000ef0bef; asc        ;;
+ 3: len 16; hex 47656e6572616c20486f73706974616c; asc General Hospital;;
+ 4: len 4; hex 800f3e06; asc   > ;;
+
+------------------
+---TRANSACTION 4680, ACTIVE 1 sec
+2 lock struct(s), heap size 1128, 1 row lock(s), undo log entries 1
+MySQL thread id 266, OS thread handle 281471144791808, query id 3759 172.23.0.2 root
+--------
+FILE I/O
+
+########## performance_schema.data_locks (row locks on hospitals) ##########
+LOCK_TYPE	LOCK_MODE	LOCK_STATUS	n
+TABLE	IX	GRANTED	21
+RECORD	X,REC_NOT_GAP	GRANTED	1
+RECORD	X,REC_NOT_GAP	WAITING	20
+
+########## lock waits ##########
+waiters
+231
+
+########## Innodb row lock counters ##########
+Variable_name	Value
+Innodb_row_lock_current_waits	22
+Innodb_row_lock_time	1102219
+Innodb_row_lock_time_avg	2204
+Innodb_row_lock_time_max	6119
+Innodb_row_lock_waits	500
+
+########## active connections / threads ##########
+Variable_name	Value
+Threads_connected	26
+Threads_running	23
+
+########## in-flight gauge (is MAX_INFLIGHT the binding constraint? P4c) ##########
+http_requests_in_flight{app="capacity-api"} 32

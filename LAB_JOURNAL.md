@@ -6,17 +6,19 @@
 >
 > **Shipped, fully evidenced:** baseline (3 runs + variance + per-endpoint
 > service time), **OPS-2201**, **OPS-2202**, and the post-incident synthesis.
-> **Not investigated: OPS-2203 and OPS-2204** — work stopped at a deadline.
+> **Not investigated: OPS-2204** — work stopped at a deadline. **OPS-2203 was
+> subsequently completed**: root-caused, fixed, and verified (`d10f8b6`), with
+> predictions pre-registered before the fix and scored after.
 >
 > | | Status | Evidence |
 > |---|---|---|
 > | Baseline | ✅ 3 runs, variance, 1-VU service time per endpoint | [`evidence/baseline/`](evidence/baseline/) |
 > | OPS-2201 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2201/`](evidence/OPS-2201/) |
 > | OPS-2202 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2202/`](evidence/OPS-2202/) |
-> | OPS-2203 | ⚠️ **partial** — regression test of shipped work only, NOT an investigation | [`evidence/OPS-2203-partial/`](evidence/OPS-2203-partial/) |
+> | OPS-2203 | ✅ investigated, 1 fix shipped & verified — **89 → 0** lock-wait timeouts, admits **8.6×** | [`evidence/OPS-2203/`](evidence/OPS-2203/) (+ [`OPS-2203-partial/`](evidence/OPS-2203-partial/) for the original regression test) |
 > | OPS-2204 | ⛔ **not investigated** — never reproduced | none; predictions untested |
 > | Synthesis | ✅ complete, from evidence gathered | this file |
-> | [`SCARS.md`](SCARS.md) | ✅ 2 incident scars + 1 methodology scar | — |
+> | [`SCARS.md`](SCARS.md) | ✅ 3 incident scars + 1 methodology scar | — |
 > | Grafana screenshots | ⏳ shoot list with exact PromQL + unix windows | [`evidence/grafana-captures.md`](evidence/grafana-captures.md) |
 >
 > **⚠️ A LIVE REGRESSION WAS FOUND IN SHIPPED CODE.** After the main submission
@@ -24,14 +26,17 @@
 > already-committed work: OPS-2202's pool raise (2 → 25) **creates
 > `ER_LOCK_WAIT_TIMEOUT` errors on `POST /api/hospitals/:id/admit` that do not
 > exist at pool=2** — 88 versus 0, with successful admits falling 82 → 67. It is
-> documented, not fixed; see the OPS-2203 PARTIAL section and [`SCARS.md`](SCARS.md).
+> **This has since been FIXED and verified** — not by reverting the pool, but by
+> moving the 500 ms `notifyBedRegistry` call out of the transaction (`d10f8b6`).
+> Timeouts went **89 → 0** at the same pool of 25. See the OPS-2203 result
+> section and [`SCARS.md`](SCARS.md).
 >
 > **Why two rather than four:** each incident was worked to the standard the
 > rubric asks for — reproduce, gather evidence, name the mechanism with capacity
 > arithmetic, fix one concern per commit, re-measure against a known noise floor
 > — and that took longer than half the time. Rather than produce four thin
 > write-ups, two are complete and two are honestly marked undone. **The
-> pre-registered predictions for OPS-2203 and OPS-2204 are left in place,
+> pre-registered predictions for OPS-2204 are left in place,
 > explicitly labelled untested**, because deleting them would hide that they
 > were made in advance; and one of them (P1-corollary) flags a **possible
 > regression introduced by shipped OPS-2202 work that was never measured.**
@@ -1387,7 +1392,7 @@ it. **Only (1)–(3) change the failure shape. (4) only moves it.**
 
 ---
 
-## Investigation — OPS-2203 — ⚠️ PARTIAL: regression test only, NOT a full investigation
+## Investigation — OPS-2203 — ✅ COMPLETE (this section records the ORIGINAL partial regression test; the full investigation, fix and scoring follow below)
 *Ticket:* [Bed admissions fail with DB errors under load](./incidents/OPS-2203.md)
 *Reproduce:* `k6 run load-tests/reproduce-OPS-2203.js`
 
@@ -1401,11 +1406,11 @@ it. **Only (1)–(3) change the failure shape. (4) only moves it.**
 > | | Status |
 > |---|---|
 > | P1-corollary (pool raise creates 1205s) | ✅ **TESTED — confirmed**, with a control arm |
-> | Root cause of OPS-2203 | ⛔ **NOT INVESTIGATED** |
-> | Capacity math for max admits/sec on one row | ⛔ **NOT DERIVED** |
+> | Root cause of OPS-2203 | ✅ **INVESTIGATED** — 500 ms `notifyBedRegistry` inside the X row lock |
+> | Capacity math for max admits/sec on one row | ✅ **DERIVED AND MEASURED** — `1/W_hold`; 2.30 → 19.80 admits/s |
 > | P1 (failure signature at pool=2 is an app-side stall) | ⛔ **NOT TESTED** — see below |
-> | A fix for OPS-2203 | ⛔ **NONE ATTEMPTED** |
-> | Blast radius / bystander probing | ⛔ **NOT MEASURED** |
+> | A fix for OPS-2203 | ✅ **SHIPPED AND VERIFIED** (`d10f8b6`) — 89 → 0 timeouts |
+> | Blast radius / bystander probing | ⛔ **STILL NOT MEASURED** — no bystander route was probed during either run |
 >
 > **What this does NOT establish:** the ticket describes admissions failing under
 > load, and this test does not diagnose that. It shows only that *a change I
@@ -1508,7 +1513,13 @@ stall rather than a DB error. This test did not score P1.** The control arm show
 throughput ceiling at pool=2 — and at pool=2 the run served only 82 admits, which
 is consistent with a stall but **was not characterized**. P1 remains **untested**.
 
-> ## ⛔ The rest of OPS-2203 — STILL NOT INVESTIGATED
+> ## ✅ SUPERSEDED — the rest of OPS-2203 was subsequently investigated
+>
+> **Everything below this line was written when the incident was unfinished and
+> is preserved unedited as the record of that state.** It is no longer current:
+> the root cause was found, a fix was shipped (`d10f8b6`) and verified, and the
+> predictions below were scored. See the result section further down. The
+> predictions are NOT retrofitted — P1 is scored **wrong** and P4a/P4c **missed**.
 >
 > **The one measured number that exists** comes from baseline service-time
 > capture, not from this investigation:
@@ -1706,6 +1717,155 @@ secondary = CATS non-FIFO (present by version, magnitude unresolved).** Stated
 as attribution with a named residual, not as agreement.
 
 
+---
+
+## OPS-2203 — RESULT and prediction scoring (P4a–P4e)
+
+*Fix:* `d10f8b6`. *Predictions:* `f8a27de`, committed before the code moved.
+*Run:* identical script, 500 VUs, 30 s, pool 25, MAX_INFLIGHT 32, all unchanged.
+*Evidence:* [`evidence/OPS-2203/`](evidence/OPS-2203/).
+
+### Headline
+
+| metric | before | after | delta | admissible |
+|---|---:|---:|---:|---|
+| **`ER_LOCK_WAIT_TIMEOUT`** | **89** | **0** | **−100%** | mechanism counter ✅ |
+| admitted (200) | 69 | **594** | **8.61×** | throughput ✅ |
+| admits/sec | 2.30 | 19.80 | 8.61× | throughput ✅ |
+| served p95 | 10.06 s | **2.39 s** | −76.2% | ✅ outside ±25% |
+| served avg | 8.03 s | 1.66 s | −79.3% | ✅ |
+| 503 shed | 426,050 | 450,167 | +5.7% | ✅ |
+| `http_req_failed` | 99.98% | 99.86% | −0.12 pp | — |
+| overall p95 (all outcomes) | 42.49 ms | 41.02 ms | −3.5% | ❌ **within noise** |
+| p99 | — | — | — | ❌ **inadmissible** (98.5% baseline spread) |
+
+Reproduced: a second identical run gave **607** admits against 594, a 2.2%
+spread.
+
+### Scorecard — 2 hits, 1 split, 2 misses
+
+**P4b — post-fix `ER_LOCK_WAIT_TIMEOUT` exactly zero. ✅ HIT.**
+The `db_errors_total` series does not exist after the fix — not "near zero",
+**absent**. The least-hedged prediction in the lab, and it held.
+
+**P4e — the pool-25 regression is closed by this fix, not by reverting. ✅ HIT.**
+Zero timeouts at the shipped pool of 25. The OPS-2202 pool raise needs **no
+revert**; the regression is closed by shrinking the critical section. (The
+*margin* is far smaller than P4e claimed — see P4a.)
+
+**P4d — error rate unmoved, served p95 down ~20×. ⚠️ SPLIT.**
+Error rate: predicted ~99.7%, measured **99.86%** — hit. Served p95: predicted
+~0.51 s, measured **2.39 s** — **missed by 4.7×**. Direction and admissibility
+right, magnitude wrong, for the same reason as P4c.
+
+**P4a — crossover N ≈ 7,250. ❌ MISS, by 72×.**
+The real crossover is **N ≈ 100**. I computed it from the hold measured on an
+**idle** database (0.690 ms). The hold that matters is the one under load, and
+that is **≈ 50.5 ms**.
+
+**P4c — the constraint moves to MAX_INFLIGHT at ~64 admits/s. ❌ MISS, on both
+the named constraint and the number.** Measured **19.8 admits/s**, 3.2× below
+prediction. I named the shedder; I explicitly ruled out the JS thread with
+`~0.1 ms CPU/req → ~10,000/s`. **The JS thread is the constraint** — not through
+CPU capacity, but by injecting latency *into the serialized section*.
+
+### What actually binds — the thing I ruled out
+
+The row lock re-binds, at a hold inflated 73× by event-loop lag:
+
+```
+nodejs_eventloop_lag_mean:  12.1 ms idle  ->  29.4 ms under load
+
+The admit txn awaits TWICE after BEGIN (UPDATE result, COMMIT). Each
+resumption queues behind the saturated loop and pays the lag:
+
+  hold ~= UPDATE(0.7) + lag(29.4) + COMMIT + lag(29.4)  ~= 59 ms
+  hold derived from throughput = 1 / 19.8 admits/s      ~= 50.5 ms   AGREES
+```
+
+A control fell out of the confirmation run by accident. The probe connection
+runs in a **separate** node process whose event loop is idle:
+
+| | hold |
+|---|---:|
+| DB-side, idle loop, **under load** (probe p50) | 0.94 ms |
+| DB-side, idle loop, idle DB (pre-fix bench) | 0.690 ms |
+| **API-side, saturated loop, under load** (derived) | **50.5 ms** |
+
+**The database is not degraded under load at all.** The entire 54× gap is
+app-side. The row lock is held across JavaScript scheduling delay, not database
+work.
+
+And the loop is saturated by **466k shed requests per run** — which the shedder
+itself generates. **OPS-2202's admission control is paying for OPS-2203's
+critical section.** The 500 ms sleep left the transaction; the event loop moved
+in.
+
+### Both misses have one cause, and it is the third instance
+
+P4a and P4c fail for the same reason: **I used an idle-measured hold time to
+predict behaviour in a saturated-event-loop system.** This is the same error the
+journal already records twice:
+
+| # | Error | Recorded as |
+|---|---|---|
+| 2201-C | Predicted the constraint would leave the event loop; it did not | "a 125× ceiling rise need not move the constraint" |
+| P5a/P5b | Failed to propagate the closed-loop rejection storm into a latency estimate | "I flagged it for P5c and **failed to propagate it** into P5a/P5b" |
+| **P4a/P4c** | **Measured the critical section on an idle loop, predicted against a saturated one** | **this section** |
+
+I wrote the P5a/P5b lesson myself and then made it again one incident later.
+The rule that would have caught it: **any duration used in a capacity prediction
+must be measured under the load the prediction is about.** The 0.690 ms was
+honest, reproducible, and irrelevant.
+
+---
+
+## Step 7 — recomputed crossover, and why the pool does NOT change
+
+The crossover is `(N−1) × W_hold = 5000 ms`. With the **under-load** hold:
+
+```
+before fix:  W = 508.86 ms   ->  N - 1 = 5000/508.86 =    9.8   ->  N ~=    11
+after, idle hold (WRONG):     ->  N - 1 = 5000/0.690  = 7246    ->  N ~= 7,247
+after, UNDER-LOAD hold:       ->  N - 1 = 5000/50.5   =   99    ->  N ~=   100
+```
+
+**The crossover moved from ~11 to ~100 — a 9× improvement, not the 660× I
+predicted.** At the shipped pool of 25 the deepest wait is
+`24 × 50.5 ms = 1.21 s` against a 5 s timeout: a **4.1× margin**, which is why
+zero timeouts were observed, and it is real but far thinner than P4e implied.
+
+### Recommendation: keep the pool at 25. Do not raise it.
+
+Raising it is not neutral — it is actively wrong, for a reason the lab already
+established:
+
+1. **It buys no throughput.** Throughput on a serialized row is `1/W_hold`,
+   independent of pool size. More connections buy *waiters*, not admits. This is
+   the OPS-2202 finding, unchanged by the fix.
+2. **It spends the margin that just got bought.** Pool 25 sits at 25% of the
+   crossover. Pool 50 → 49.5% of it; pool 100 → **at** it, and 1205s return.
+   Raising the pool would re-open the regression this fix just closed.
+
+**Not changed without measuring, per the plan.** The pool stays at 25 and no
+config was touched in this step.
+
+### Where throughput would actually come from
+
+Ranked, since the constraint is now named:
+
+1. **Take `notifyBedRegistry` off the request path entirely** (enqueue, respond,
+   notify asynchronously). Frees the in-flight slot in ~1 ms instead of ~500 ms.
+2. **Cut the shed-request cost** — the loop is saturated by 466k rejections/run.
+   Rejecting more cheaply directly shrinks the lock hold, because the lag is
+   *inside* the critical section.
+3. **Reduce serialization** — per-hospital sharding or an atomic decrement
+   without a read-modify-write window.
+
+Each is a separate change, separately measured, and **none of them were
+attempted or verified here.**
+
+
 ### Everything below is unfilled template
 
 ---
@@ -1886,11 +2046,11 @@ is more informative than any individual result. Updated as each incident closes.
 | P6 | Clustering 2–3.5×, same collapse shape | ❌ **Half** — 1.48× peak, then **negative** (0.50× at 4 workers); shape ✅ unchanged (0.00% errors throughout) | Expected sub-linear CPU scaling; got **memory** exhaustion. Workers are bounded by heap, not cores |
 | P1 | 2203 is not a lock-timeout incident; near-zero 1205s | ❌ **Wrong** — 89 lock-wait timeouts at pool 25 | The ticket's "failed with a database error" was right and I was wrong. P1 reasoned from `connectionLimit: 2`, which OPS-2202 had already changed to 25 — I predicted against a config that no longer existed |
 | P1-corollary | Fixing 2202's pool will *create* 1205s in 2203 | ✅ **Hit** — 0 at pool 2, 89 at pool 25, control arm included | A fix in one incident manufactured the failure mode of another. Strongest single piece of evidence that these are one capacity system, not four bugs |
-| P4a | Crossover N moves ~11 → ~7,250 once the 500 ms leaves the txn | ⏳ pending step 6 | — |
-| P4b | Post-fix `ER_LOCK_WAIT_TIMEOUT` **exactly zero** at pool 25 | ⏳ pending step 6 | — |
-| P4c | Constraint moves to **MAX_INFLIGHT=32**, ~64 admits/s | ⏳ pending step 6 | — |
-| P4d | Error *rate* stays ~99.7%; served p95 falls ~20× to ~0.51 s | ⏳ pending step 6 | — |
-| P4e | Pool-25 regression closed by the fix, no revert needed | ⏳ pending step 6 | — |
+| P4a | Crossover N moves ~11 → ~7,250 once the 500 ms leaves the txn | ❌ **Missed by 72×** — real crossover **N ≈ 100** | I measured the critical section on an **idle** loop (0.690 ms). Under load it is **50.5 ms** — event-loop lag sits *inside* the lock |
+| P4b | Post-fix `ER_LOCK_WAIT_TIMEOUT` **exactly zero** at pool 25 | ✅ **Hit** — the `db_errors_total` series is **absent** | The least-hedged prediction in the lab held |
+| P4c | Constraint moves to **MAX_INFLIGHT=32**, ~64 admits/s | ❌ **Wrong on mechanism** — 19.8 admits/s; the **JS thread** binds | I ruled the JS thread out on CPU (~10,000/s). It binds by injecting **latency into the serialized section**, not by running out of CPU |
+| P4d | Error *rate* stays ~99.7%; served p95 falls ~20× to ~0.51 s | ⚠️ **Split** — rate ✅ 99.86%; p95 ❌ 2.39 s (4.7× high) | Same root cause as P4c |
+| P4e | Pool-25 regression closed by the fix, no revert needed | ✅ **Hit** — 0 timeouts at pool 25, no revert | Margin is **4.1×**, not the 290× claimed — the hit is on the call, not the arithmetic |
 | P2 | 2204 OOMs at 2–3 concurrent exports; exit 137 | ⏳ pending 2204 | — |
 
 ### The shipped gates failed three different ways for one reason
@@ -2087,12 +2247,20 @@ Measured memory pressure, from evidence gathered for *other* purposes:
    scope, but needs ~100× the traffic to reach the same place (3,391 req/s
    ceiling). Recovers instantly when load drops, and memory stayed flat at
    96.6 MiB — no lasting damage.
-4. **OPS-2203 — admissions (NOT INVESTIGATED).** Ranked last on the strength of
-   one measured number: `W = 508.86 ms` at 1 VU. Row-lock serialization is
-   **bounded in scope** — it should throttle admissions to one hospital row
-   without consuming a resource other endpoints need, *provided* the connection
-   pool is large enough that blocked admits don't starve reads. That proviso is
-   exactly what the old pool of 2 violated, and it is untested.
+4. **OPS-2203 — admissions (INVESTIGATED AND FIXED).** Ranked last on the
+   strength of one measured number: `W = 508.86 ms` at 1 VU. Row-lock
+   serialization is **bounded in scope** — it throttles admissions to one
+   hospital row without consuming a resource other endpoints need, *provided*
+   the pool is large enough that blocked admits don't starve reads.
+   **The ranking survives, but one clause of the reasoning did not.** Moving the
+   500 ms call out of the transaction took timeouts 89 → 0 and admits 2.30 →
+   19.80/s at the same pool of 25, so the proviso was satisfiable without
+   touching the pool. What the ranking missed is that the serialized section
+   turned out to contain **event-loop lag**, which is emphatically *not* bounded
+   in scope — it is the shared JS thread, and the 466k shed requests that
+   saturate it come from OPS-2202's admission control. The blast radius of the
+   *coupling* was never measured: **no bystander route was probed during either
+   run**, so the "bounded in scope" claim remains asserted, not demonstrated.
 
 **Note the ranking is not the order I worked them, and not the ticket priority
 order** (2202 and 2203 are P1; 2201 and 2204 are P2). The two P2s rank 1st and
@@ -2137,7 +2305,7 @@ Per incident, and then the general rule:
 |---|---|---|
 | **OPS-2201** | error rate (0.00%), `db_errors_total` (never incremented), DB health (MySQL 68–74% CPU, 65% pool idle — genuinely green) | **p95 across ALL routes.** The bystander `/recent` degraded 1,400× and generated no ticket. Also `http_requests_in_flight` ≈ 200. |
 | **OPS-2202** | error rate (0.00%, 0 of 103,760), `db_errors_total` (series never created), DB health (21% CPU, 9% pool), **the incident's own shipped `http_req_failed` gate — it PASSED**, and `nodejs_eventloop_lag_p99` (10–14 ms, flat) | **`http_requests_in_flight` = 2,005** against a steady state of <1. Also per-route p95 (36×). |
-| **OPS-2203** | NOT INVESTIGATED | untested |
+| **OPS-2203** | **the `p(95)<1000` latency gate — it PASSED at 42.49 ms** while 99.98% of requests failed; `db_errors_total` did fire (89) but named only ER_LOCK_WAIT_TIMEOUT, giving no hint the cause was a 500 ms sleep inside a transaction | `http_requests_in_flight` = 32 pinned at the cap; served-only p95 (10.06 s vs the 42 ms aggregate); `Innodb_row_lock_current_waits` = 24 |
 | **OPS-2204** | NOT INVESTIGATED | untested |
 
 > **The proposed detector:**

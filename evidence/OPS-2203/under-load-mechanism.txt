@@ -1,0 +1,55 @@
+=== event-loop lag DURING load (unix 1787034813) ===
+nodejs_eventloop_lag_max_seconds{app="capacity-api"} 0.038469631
+nodejs_eventloop_lag_mean_seconds{app="capacity-api"} 0.029430537721518987
+nodejs_eventloop_lag_p50_seconds{app="capacity-api"} 0.028098559
+nodejs_eventloop_lag_p90_seconds{app="capacity-api"} 0.033980415
+nodejs_eventloop_lag_p99_seconds{app="capacity-api"} 0.038109183
+
+=== in-flight ===
+http_requests_in_flight{app="capacity-api"} 32
+
+=== lock-hold measured from a 26th connection DURING load ===
+  UNDER LOAD  n=40  avg 444.09 ms  p50 0.94  p95 1311.84  max 1326.38
+  IDLE baseline (measured pre-fix): avg 0.690 ms
+  inflation factor: 643.6x
+
+===============================================================================
+INTERPRETATION — why the 26th-connection number looks bimodal
+===============================================================================
+p50 0.94 ms, p95 1311 ms. The probe times from beginTransaction to commit, and
+the UPDATE BLOCKS waiting for the row lock, so the large values are lock WAIT,
+not lock HOLD. The p50 of 0.94 ms is the case where the probe got the lock
+immediately, and THAT is the DB-side hold.
+
+The probe runs in a SEPARATE node process (docker exec), whose event loop is
+idle. The API's own connections do not have that luxury. This makes the probe an
+accidental but clean CONTROL:
+
+  DB-side hold, unsaturated event loop, under load : 0.94 ms  (p50, probe)
+  DB-side hold, unsaturated event loop, idle       : 0.690 ms (pre-fix bench)
+  --> the DATABASE is not degraded under load at all.
+
+  API-side hold, derived from throughput           : 50.5 ms
+      594 admits / 30 s = 19.8 admits/s on a serialized row => hold = 1/19.8
+
+  The 54x gap between 0.94 ms and 50.5 ms is entirely APP-SIDE.
+
+===============================================================================
+THE MECHANISM — event-loop lag is inside the critical section
+===============================================================================
+  nodejs_eventloop_lag_mean : 12.1 ms idle  ->  29.4 ms under load  (2.4x)
+
+The admit transaction awaits twice after BEGIN: once on the UPDATE result, once
+on COMMIT. Each resumption is queued behind a saturated event loop, so each pays
+the lag:
+
+  hold ~= UPDATE(0.7 ms) + lag(29.4) + COMMIT + lag(29.4)  ~=  59 ms
+  derived from throughput                                   ~=  50.5 ms   AGREES
+
+The row lock is held across JavaScript scheduling delay, not just database work.
+466k shed requests per run are what saturate the loop, and the shedder is what
+generates them -- so OPS-2202's admission control is paying for OPS-2203's
+critical section. The 500 ms sleep left the transaction; the event loop moved in.
+
+CONSEQUENCE: the effective crossover is 5000/50.5 = N ~= 100, NOT the ~7,250
+predicted from the idle hold. Pool 25 is safe with a 4.1x margin, not 290x.

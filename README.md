@@ -7,31 +7,39 @@
 > | Baseline | ✅ | 3 runs + variance. **p95 varies 24% run-to-run, p99 99%** — so p99 is treated as inadmissible evidence throughout |
 > | **OPS-2201** | ✅ fixed & verified | **34.09 → 4,247 req/s (124.6×)**. Not from the index the ticket implied — that made the DB 2.5× faster and moved throughput +1.6% |
 > | **OPS-2202** | ✅ fixed & verified | Pool was **9% utilized**; the bottleneck was one JS thread at 3,391 req/s. Pool raise was a **documented no-op (+1.0%)** |
-> | OPS-2203 | ⚠️ **partial** | Regression test of my own shipped work only. **Found a live regression — see below.** Root cause NOT investigated |
+> | **OPS-2203** | ✅ fixed & verified | 500 ms network call inside an X row lock. **`ER_LOCK_WAIT_TIMEOUT` 89 → 0**, admits **8.61×**. Its own `p(95)<1000` gate **PASSED at 42 ms while 99.98% of requests failed** |
 > | OPS-2204 | ⛔ **not investigated** | Never reproduced. One adjacent measurement: 1-VU export = 34.47 MiB, did not OOM |
 >
-> **Why two of four:** each was worked to the rubric's standard — reproduce,
+> **Why three of four:** each was worked to the rubric's standard — reproduce,
 > evidence, mechanism + capacity arithmetic, one concern per commit, re-measure
 > against a known noise floor. That is slower than four thin write-ups, and I
-> chose depth. The two undone are marked undone rather than padded.
+> chose depth. The one undone is marked undone rather than padded.
 >
-> ### ⚠️ Known live regression in this submission's own code
+> ### ✅ Regression found in this submission's own code — and since fixed
+
+> **OPS-2202's pool raise (`connectionLimit` 2 → 25) introduced
+> `ER_LOCK_WAIT_TIMEOUT` (MySQL 1205) on `POST /api/hospitals/:id/admit` that did
+> not exist at pool=2: 89 versus 0**, confirmed with a control arm. Cause: the
+> small pool was rationing access to a row lock held for 508 ms; a bigger pool
+> adds waiters, not throughput, until the last waiter exceeds the 5 s lock
+> timeout and queueing becomes failing.
 >
-> **OPS-2202's pool raise (`connectionLimit` 2 → 25) introduces
-> `ER_LOCK_WAIT_TIMEOUT` (MySQL 1205) errors on `POST /api/hospitals/:id/admit`
-> that do not exist at pool=2: 88 versus 0, with successful admits falling
-> 82 → 67.** Confirmed with a control arm. Cause: the small pool was rationing
-> access to a row lock held for 508 ms; a bigger pool adds waiters, not
-> throughput, until the last waiter exceeds the 5 s lock timeout and queueing
-> becomes failing.
+> **Fixed — and not by reverting the pool.** The recommended revert to
+> `MYSQL_POOL_SIZE=8` was *not* carried out, because it treated the symptom. The
+> 500 ms `notifyBedRegistry` call was moved out of the transaction instead
+> (`d10f8b6`): critical section **508.86 ms → 0.690 ms**, timeouts **89 → 0 at
+> the unchanged pool of 25**, admits **2.30 → 19.80/s**. The pool raise was never
+> the defect — only what exposed it.
 >
-> **Documented, not fixed** — no fix could be verified before the deadline.
-> Recommended action: revert the default to `MYSQL_POOL_SIZE=8`
-> (`api/database.js:38`); crossover math gives N ≤ 10 safe, and OPS-2202 measured
-> the raise as worth +1.0%, so reverting costs nothing measured. The real fix is
-> moving the 500 ms registry call out of the transaction. See
-> [`SCARS.md`](./SCARS.md) scar **OPS-2202-R** and the OPS-2203 PARTIAL section
-> of [`LAB_JOURNAL.md`](./LAB_JOURNAL.md).
+> **The residual, stated plainly:** the fix did not remove the serialization.
+> **20 row-lock waiters remain**, and the critical section still contains
+> **event-loop lag** (12.1 → 29.4 ms under load), which inflates the real lock
+> hold to ~50 ms — **73× the idle measurement**. The effective crossover is
+> **N ≈ 100, not the ≈ 7,250** the idle number predicts, so pool 25 carries a
+> **4.1× margin, not 290×**. That loop is saturated by the 466k requests
+> OPS-2202's shedder rejects per run: **one incident's fix now sits inside
+> another incident's critical section.** See [`SCARS.md`](./SCARS.md) scars
+> **OPS-2202-R** and **OPS-2203**.
 >
 > **Three things worth your time if you read nothing else:**
 > 1. **The obvious fix didn't work, and the journal proves it rather than

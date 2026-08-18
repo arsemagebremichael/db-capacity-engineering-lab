@@ -1,0 +1,47 @@
+===============================================================================
+OPS-2203 BEFORE — error-code breakdown
+k6 window unix 1787034040 -> 1787034079 (39s)
+Captured: 2026-08-18T06:22:28Z UTC
+
+NOTE ON METHOD: capacity-api was started fresh at ~09:14 local and this k6 run
+was the ONLY load against it, so the cumulative counter values below ARE the
+window totals exactly. They are quoted in preference to Prometheus increase(),
+which reported 82 lock-wait timeouts vs the true 89 — a known extrapolation
+artifact of increase() over a short window with a rising counter. The exact
+counters reconcile perfectly with k6 (see reconciliation below); increase()
+does not. Where the two disagree, the exact counters are correct.
+===============================================================================
+
+########## db_errors_total by code ##########
+  db_errors_total{route="/api/hospitals/:id/admit",code="ER_LOCK_WAIT_TIMEOUT",app="capacity-api"} 89
+
+########## http_requests_total by status_code (what k6 received) ##########
+  http_requests_total{method="POST",route="/api/hospitals/1/admit",status_code="503",app="capacity-api"} 426050
+  http_requests_total{method="POST",route="/api/hospitals/:id/admit",status_code="200",app="capacity-api"} 69
+  http_requests_total{method="POST",route="/api/hospitals/:id/admit",status_code="500",app="capacity-api"} 89
+
+########## http_requests_rejected_total (MAX_INFLIGHT=32 shedder) ##########
+  http_requests_rejected_total{route="/api/hospitals/1/admit",app="capacity-api"} 426050
+
+===============================================================================
+RECONCILIATION — every request accounted for
+===============================================================================
+  503 shed by MAX_INFLIGHT (never reached the txn) : 426,050   99.9634%
+  500 ER_LOCK_WAIT_TIMEOUT (reached txn, timed out):      89    0.0209%
+  200 admitted (reached txn, committed)            :      69    0.0162%
+                                                     ---------
+  TOTAL                                            : 426,208
+  k6 http_reqs                                     : 426,208   <-- exact match
+
+  Requests that actually reached the transaction   :     158  (89 + 69)
+  Of those reaching the txn, share that timed out  :  56.3%   (89/158)
+
+  Successful admits / wall-clock 30s               :   2.30 admits/s
+  Predicted single-row ceiling 1/W = 1/0.50886     :   1.97 admits/s
+  --> throughput is pinned at the 1/W_lock ceiling, as predicted.
+
+LATENCY NOTE: k6 reports an overall p95 of 42.49 ms, which PASSES the
+p(95)<1000 threshold. That number is meaningless here — it is dominated by
+426k instant 503 rejections. The honest latency is the one restricted to
+requests that were actually served: p95 = 10.06 s, avg = 8.03 s
+(k6 '{ expected_response:true }' row). Quote that, not the 42 ms.

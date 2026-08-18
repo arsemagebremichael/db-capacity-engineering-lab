@@ -150,10 +150,14 @@ past ~36 brings OPS-2204's OOM back. There is a real optimum between those and
 distinguish a ~3.6 MiB export from a ~0 MiB admit. A per-route cap is the change
 that would decouple them and it was **not attempted.**
 
-**Grafana panels.** The capture sheet at
-[`evidence/grafana-captures.md`](./evidence/grafana-captures.md) lists what is
-shot and what is not. Rows marked ⛔ are inapplicable, not pending — the run
-that would have produced the window never happened.
+**Grafana panels — the one deliverable with a real hole in it.** Of nine
+windows on the capture sheet
+([`evidence/grafana-captures.md`](./evidence/grafana-captures.md)), **one is
+shot** and eight are not. All eight are inside Prometheus retention with exact
+windows and pinned axis values recorded, so they are capturable, not lost — but
+they are **not captured**, and that is stated here rather than left to be
+discovered. The one existing shot (`OPS-2201/grafana-throughput-ALL.png`) is
+flagged for re-shoot on a log axis.
 
 **Two OPS-2202 findings that framed OPS-2204 and proved right:** peak RSS
 reached **148.7 MiB of 160 MiB (93%) under search load alone**, and clustering

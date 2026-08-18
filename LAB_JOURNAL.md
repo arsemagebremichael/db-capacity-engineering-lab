@@ -333,6 +333,13 @@ contaminated run looked like a real tail-latency finding and was not.
 
 ### Pre-registered predictions — written before the incidents were run
 
+> **All predictions in this section have since been scored.** The text below is
+> preserved exactly as written *before* any incident was run, tense and all — so
+> phrases like "does not yet test it" describe the state at the time of writing,
+> not now. Results are in the scorecard under
+> [Post-incident review](#post-incident-review-synthesis): **24 predictions,
+> 12 hits, 1 split, 11 misses.**
+
 Recorded here, timestamped ahead of the evidence, so they can be *scored* rather
 than retrofitted. I read the source before forming these, which means I am primed
 to confirm them; each one therefore names the artifact that would kill it, and

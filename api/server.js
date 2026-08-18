@@ -268,15 +268,77 @@ function notifyBedRegistry(_hospitalId) {
 
 // ---------------------------------------------------------------------------
 // Full patient export for the analytics/ETL team.
+//
+// This endpoint used to do `SELECT * FROM patients` into an array and then
+// res.json() it. That held TWO full copies of the result set in memory at once:
+// the 100k materialized row objects, and the 34.47 MiB string JSON.stringify
+// built from them. One export cost ~89 MiB of RSS against a 160 MiB cgroup, so
+// THREE concurrent exports killed the process -- exit 137, OOMKilled, and a
+// restart every ~12 s under the nightly job (OPS-2204).
+//
+// Note the pool never bounded this. `pool.query()` releases the connection when
+// it RESOLVES, which is before the expensive part: the rows are already resident
+// and the serialization happens afterwards holding no connection at all. The
+// pool serializes query execution, not memory residency -- which is why a pool
+// of 25 died at 3 concurrent callers.
+//
+// It now streams: rows are read one at a time from MySQL and written straight
+// to the socket, so peak memory is O(one row + socket buffer) instead of
+// O(result set), whatever the table grows to.
+//
+// The response is byte-for-byte identical to the old one, which is why `count`
+// is fetched first -- the contract puts it before `data`, and a streaming
+// writer cannot know it up front. Both statements run inside one REPEATABLE
+// READ transaction with a consistent snapshot, so the count cannot disagree
+// with the rows even if the table is written mid-export.
 // ---------------------------------------------------------------------------
 app.get('/api/patients/export', async (_req, res) => {
+  const pool = getPool();
+  let conn;
+  let wroteAnything = false;
   try {
-    const pool = getPool();
-    const [rows] = await pool.query('SELECT * FROM patients');
-    res.json({ count: rows.length, data: rows });
+    conn = await pool.getConnection();
+    // One snapshot for both the count and the rows.
+    await conn.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    await conn.query('START TRANSACTION WITH CONSISTENT SNAPSHOT');
+
+    const [[{ n }]] = await conn.query('SELECT COUNT(*) AS n FROM patients');
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.write(`{"count":${n},"data":[`);
+    wroteAnything = true;
+
+    // .stream() emits row objects as they arrive instead of buffering the set.
+    // Backpressure matters: without it the rows would simply pile up in the
+    // socket's write queue and we would have moved the leak, not fixed it.
+    const stream = conn.connection.query('SELECT * FROM patients').stream();
+    let first = true;
+    for await (const row of stream) {
+      const chunk = (first ? '' : ',') + JSON.stringify(row);
+      first = false;
+      if (!res.write(chunk)) {
+        await new Promise((resolve) => res.once('drain', resolve));
+      }
+    }
+
+    res.end(']}');
+    await conn.commit();
   } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+    }
     dbErrorsTotal.inc({ route: '/api/patients/export', code: err.code || 'UNKNOWN' });
-    res.status(500).json({ error: err.code || 'ERROR', message: err.message });
+    // Once the body has started there is no status code left to send, and the
+    // JSON is already truncated. Destroying the socket is what tells the client
+    // the payload is incomplete -- ending it normally would hand over a
+    // truncated document that parses as valid-looking garbage.
+    if (wroteAnything) {
+      res.destroy(err);
+    } else {
+      res.status(500).json({ error: err.code || 'ERROR', message: err.message });
+    }
+  } finally {
+    if (conn) conn.release();
   }
 });
 

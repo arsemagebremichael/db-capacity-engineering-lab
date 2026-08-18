@@ -3,10 +3,9 @@
 Read this at 2am. Every number here was measured; raw output is in
 [`evidence/`](./evidence/). Full working in [`LAB_JOURNAL.md`](./LAB_JOURNAL.md).
 
-**Scope:** OPS-2201, OPS-2202 and **OPS-2203** were investigated and fixed.
-OPS-2204 was not worked at all. See [Not investigated](#not-investigated).
-Scar OPS-2202-R below records a regression this submission introduced; scar
-**OPS-2203** records the fix that closed it.
+**Scope:** all four incidents — OPS-2201, OPS-2202, OPS-2203 and OPS-2204 —
+were investigated, fixed and verified. Scar OPS-2202-R records a regression this
+submission introduced; scar **OPS-2203** records the fix that closed it.
 
 > ⚠️ **Read scar OPS-2202-R first if you are deploying this.** It documents a
 > live regression introduced by a fix in this submission: `ER_LOCK_WAIT_TIMEOUT`
@@ -112,27 +111,52 @@ Both produced clean-looking tables while measuring nothing.
 
 ---
 
-## Not investigated
+## ✅ OPS-2204 — An unbounded export held two full copies of the table
 
-**OPS-2204 (nightly export) was not worked at all.** No reproduction was run, no
-fix attempted.
+- **S — Symptom:** the nightly ETL job (50 concurrent callers of `GET /api/patients/export`) **killed the service repeatedly** — `RestartCount` **0 → 10 in 121 s**, `ExitCode=137`, `OOMKilled=true`. k6 saw **1,200,251 requests, ZERO successes, `data_received = 0 B`**, 96.28% `connection refused`. **This was not a brownout, it was an outage** — the process was absent, not slow. It recovered on its own once load stopped.
+- **C — Cause:** `SELECT * FROM patients` was materialized into an array and then `res.json()`'d, holding **two full copies at once** — 100,000 row objects *and* the 34.47 MiB string `JSON.stringify` built from them. **One export cost ~89 MiB of RSS against a 160 MiB cgroup.** Measured threshold: 1 concurrent survives, 2 survives at 83% of cap, **3 dies**. `NODE_OPTIONS=--max-old-space-size=256` lets V8 over-commit past the 160 MiB container, so the **kernel** wins the kill — 10 of 11 deaths were cgroup SIGKILLs, 1 was V8's own heap limit.
+- **A — Action:** stream the result set (`c87b91c`). Rows are read one at a time via mysql2 `.stream()` and written straight to the socket with `res.write()` backpressure honoured, so peak memory is O(one row + socket buffer) instead of O(result set). `count` is fetched first inside a REPEATABLE READ consistent snapshot so the response stays **byte-identical** and the count cannot disagree with the rows.
+- **R — Result:** **`RestartCount` 10 → 0** over the identical 2-minute run. Per-export RSS delta **+89 MiB → +2.52 MiB (35× less)**. Death threshold **3 → survives all 32** the shedder admits. Successful exports **0 → 356**, `data_received` **0 B → 13 GB**. Payload byte-identical (36,141,185 bytes) and *faster* uncontended (0.591 → 0.377 s).
+- **Scar / lesson — the pool cannot bound memory, and it never could.** The tempting reasoning is "pool of 25 ⇒ at most 25 concurrent exports ⇒ bounded." It is wrong, and the service dying at **3** while the pool sat at 25 proves it: `pool.query()` releases the connection when it **resolves**, which is *before* the expensive part — the rows are already resident and the serialization happens afterwards holding no connection at all. **A connection pool serializes query execution; it does not serialize memory residency.** If you want to bound memory, bound the *result set*, not the connections.
+  **The second lesson is worse, because nobody did anything to cause it: `MAX_INFLIGHT=32` was UNCHANGED across this fix and its value inverted.** Before, 32 concurrent exports needed ~2,850 MiB against a 160 MiB cap — the admission control was 16× more permissive than survivable and offered **no protection whatsoever** while appearing to be a safety limit. After, the same 32 needs ~115 MiB and is exactly what holds the storm alive. **A correctly configured limit is not a property of the limit — it is a property of the limit AND the cost of the work behind it.** A number that was right yesterday is wrong the moment an endpoint's cost changes, and nothing in the system will tell you.
+  **Margin, stated rather than celebrated:** the storm still peaks at **141.3 MiB of 160 — 88%.** At ~3.6 MiB per concurrent stream over a ~27 MiB baseline, safe concurrency is ~37 against a configured 32: a **1.16× margin**. Raising `MAX_INFLIGHT` past ~36 brings the OOM back, and so does growing the average row — which is the exact thing the ticket says keeps happening. **Watch `process_resident_memory_bytes` > 140 MiB, and treat `MAX_INFLIGHT` as coupled to row width.** Not attempted: a per-route concurrency cap for this endpoint, which is what would actually decouple it.
+  **Alert that would have caught it:** container `RestartCount` climbing, or `State.ExitCode=137`. **Note what would NOT: any in-process metric.** The process was SIGKILLed, so `db_errors_total`, per-route p95 and `http_requests_in_flight` all reported *nothing* — there were no requests to observe. **The only witness to a process being killed is outside the process.**
+- **Evidence:** [`evidence/OPS-2204/`](./evidence/OPS-2204/) — `k6-before.txt` (with the aggregated failure breakdown), `k6-after.txt`, `restart-storm-timeline.txt` (per-2s RestartCount/ExitCode/OOMKilled), `concurrency-sweep.txt` / `-after.txt`, `service-time-1vu-export.txt`. Predictions P2 and P7a–e pre-registered before the fix and scored: **P2 hit; P7 3 hits, 1 miss (P7d, both parts).**
 
-**OPS-2203 has since been investigated and fixed** (scar OPS-2203 below): root
-cause found, capacity math derived and measured, fix shipped and verified.
-**Two things about it remain NOT measured, and are not claimed:** its failure
-signature at the original pool of 2 (P1 — never characterised, scored *wrong*
-on its main claim), and **blast radius — no bystander route was probed during
-either run**, so the "bounded in scope" claim is asserted, not demonstrated. Predictions for both were pre-registered
-in [`LAB_JOURNAL.md`](./LAB_JOURNAL.md) **before** the deadline and are left
-standing as **untested** — they are hypotheses, not findings.
+---
 
-One measured data point exists for OPS-2204, from baseline service-time
-capture: a **1-VU export returned 36,141,185 B (34.47 MiB) per call and did not
-OOM** — `RestartCount 0`, `exitCode 0`, `OOMKilled=false`. That is consistent
-with the untested prediction of OOM at 2–3 concurrent exports, but does not
-test it.
+## What remains unmeasured
 
-Two findings from OPS-2202 point at OPS-2204 and are worth reading first:
-peak RSS reached **148.7 MiB of 160 MiB (93%) under search load alone**, and
-clustering hit **96–99.6%** of the cap. **Memory is the shared ceiling in this
-container**, and the export needs 34.5 MiB per concurrent caller.
+All four incidents are investigated, fixed and verified. These are the gaps that
+remain, listed so they are not mistaken for things that were checked.
+
+**OPS-2203 — the failure signature at the original pool of 2.** P1 predicted an
+app-side pool-queue stall rather than a database error, and was scored **wrong**
+on its main claim. The control arm shows zero DB errors at pool 2, consistent
+with half of P1, but queue latency, offered-vs-served rate and the throughput
+ceiling at pool 2 were **never characterised**.
+
+**OPS-2203 — blast radius.** No bystander route was probed during either the
+before or after run. The claim that row-lock serialization is "bounded in scope"
+is **asserted, not demonstrated** — and the event-loop coupling found later
+suggests it may not be.
+
+**OPS-2204 — the interaction optimum.** Lowering `MAX_INFLIGHT` sheds more,
+which raises event-loop lag, which lengthens OPS-2203's lock hold; raising it
+past ~36 brings OPS-2204's OOM back. There is a real optimum between those and
+**it was not found.**
+
+**OPS-2204 — a per-route concurrency cap.** The global in-flight limit cannot
+distinguish a ~3.6 MiB export from a ~0 MiB admit. A per-route cap is the change
+that would decouple them and it was **not attempted.**
+
+**Grafana panels.** The capture sheet at
+[`evidence/grafana-captures.md`](./evidence/grafana-captures.md) lists what is
+shot and what is not. Rows marked ⛔ are inapplicable, not pending — the run
+that would have produced the window never happened.
+
+**Two OPS-2202 findings that framed OPS-2204 and proved right:** peak RSS
+reached **148.7 MiB of 160 MiB (93%) under search load alone**, and clustering
+hit **96–99.6%** of the cap. **Memory is the shared ceiling in this container** —
+which is why the export, needing 34.47 MiB per concurrent caller before the fix,
+killed the process at three of them.

@@ -6,9 +6,10 @@
 >
 > **Shipped, fully evidenced:** baseline (3 runs + variance + per-endpoint
 > service time), **OPS-2201**, **OPS-2202**, and the post-incident synthesis.
-> **Not investigated: OPS-2204** — work stopped at a deadline. **OPS-2203 was
-> subsequently completed**: root-caused, fixed, and verified (`d10f8b6`), with
-> predictions pre-registered before the fix and scored after.
+> **All four incidents are now investigated, fixed and verified.** OPS-2201 and
+> OPS-2202 shipped in the original submission; **OPS-2203** (`d10f8b6`) and
+> **OPS-2204** (`c87b91c`) were completed afterwards, each with predictions
+> pre-registered before the fix and scored after, hit or miss.
 >
 > | | Status | Evidence |
 > |---|---|---|
@@ -16,9 +17,9 @@
 > | OPS-2201 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2201/`](evidence/OPS-2201/) |
 > | OPS-2202 | ✅ investigated, 3 fixes shipped & verified | [`evidence/OPS-2202/`](evidence/OPS-2202/) |
 > | OPS-2203 | ✅ investigated, 1 fix shipped & verified — **89 → 0** lock-wait timeouts, admits **8.6×** | [`evidence/OPS-2203/`](evidence/OPS-2203/) (+ [`OPS-2203-partial/`](evidence/OPS-2203-partial/) for the original regression test) |
-> | OPS-2204 | ⛔ **not investigated** — never reproduced | none; predictions untested |
+> | OPS-2204 | ✅ investigated, 1 fix shipped & verified — **10 → 0** restarts, per-export RSS **35× lower** | [`evidence/OPS-2204/`](evidence/OPS-2204/) |
 > | Synthesis | ✅ complete, from evidence gathered | this file |
-> | [`SCARS.md`](SCARS.md) | ✅ 3 incident scars + 1 methodology scar | — |
+> | [`SCARS.md`](SCARS.md) | ✅ 4 incident scars + 1 methodology scar | — |
 > | Grafana screenshots | ⏳ shoot list with exact PromQL + unix windows | [`evidence/grafana-captures.md`](evidence/grafana-captures.md) |
 >
 > **⚠️ A LIVE REGRESSION WAS FOUND IN SHIPPED CODE.** After the main submission
@@ -1953,6 +1954,120 @@ attempted or verified here.**
 
 ---
 
+### Result and scoring — P7a–P7e: 3 hits, 1 split, 1 miss
+
+*Fix:* `c87b91c`. *Predictions:* `f736741`, committed before the code moved.
+*Run:* identical script, 50 VUs, 2 min, `MAX_INFLIGHT=32` and pool 25 unchanged.
+
+| metric | before | after | |
+|---|---:|---:|---|
+| **`RestartCount` over the 2-min run** | **10** | **0** | the headline |
+| exit state | `137`, `OOMKilled=true` | clean, `running` | |
+| successful exports | **0** | **356** | |
+| `data_received` | **0 B** | **13 GB** | |
+| RSS delta, one export | **+89 MiB** | **+2.52 MiB** | **35× less** |
+| dies at N concurrent | **3** | **survives 32** | |
+| peak RSS, 32 concurrent | *dead* | 106.5 MiB | |
+| peak RSS, 50-VU storm | *dead* | 141.3 MiB (88% of cap) | |
+| payload | 36,141,185 B | 36,141,185 B | byte-identical |
+
+**P7a — peak RSS bounded, delta below +25 MiB. ✅ HIT, with room.**
+One export moves RSS 27.2 → 29.72 MiB, a **+2.52 MiB** delta against +89 MiB
+before — an order of magnitude inside the predicted band. The concurrency sweep
+confirms it is no longer proportional to the result set: N=3 → 38.3 MiB,
+N=8 → 71.8, N=16 → 99.5, N=32 → 106.5.
+
+**P7b — the N=3 death threshold disappears. ✅ HIT, including the stronger form.**
+N = 3, 4, 8, 16 and 32 all survive with `RestartCount` delta **0** and every
+request returning 200 (3/3, 4/4, 8/8, 16/16, 32/32).
+
+**P7c — the 50-VU storm survives with zero restarts. ✅ HIT.**
+`RestartCount` delta **exactly 0** across the full 2-minute run, against 10
+before. The least hedged of the five, and it held.
+
+**P7e — response byte-identical. ✅ HIT.**
+36,141,185 bytes, `count: 100000`, deep-equal to the pre-fix payload, and
+*faster* uncontended: 0.591 s → 0.377 s.
+
+**P7d — ≥500 exports, constraint becomes the pool at 25. ❌ MISS on both.**
+Measured **356** exports, not ≥500. And the constraint is **not** the pool:
+
+```
+during the storm:
+  nodejs_eventloop_lag_mean   589 ms      (12 ms idle, 29 ms in OPS-2203)
+  http_requests_in_flight      32         pinned at MAX_INFLIGHT
+  MySQL Threads_connected      26
+  MySQL Threads_running        12         <-- pool has SPARE capacity
+```
+
+The pool is not saturated. **The single JS thread is**, at a lag of 589 ms —
+twenty times the 29 ms that was enough to inflate OPS-2203's lock hold 73×.
+Streaming replaced one bulk `JSON.stringify` with **100,000 per-row
+`stringify` + `write()` pairs per export**, ~300k/s across the run. It traded
+peak memory for per-row CPU, and the CPU is what now runs out.
+
+### I named the wrong constraint twice in two incidents, the same way
+
+| | I predicted | Actually bound |
+|---|---|---|
+| OPS-2203 P4c | shedder (`MAX_INFLIGHT=32`) | **the JS thread** |
+| OPS-2204 P7d | pool (25 connections) | **the JS thread** |
+
+Both times I named a **counted resource** — in-flight slots, pool connections —
+because those have obvious numbers attached and the arithmetic is satisfying.
+Both times the answer was the **shared, uncounted thread**. This lab has now
+found the single JS thread to be the binding constraint in **OPS-2201, OPS-2202,
+OPS-2203 and OPS-2204** — every incident — and I have predicted something else
+in three of the four.
+
+**The rule:** in a single-threaded runtime, the default hypothesis for any
+capacity question is the thread. A resource with a configured limit is the
+*easy* thing to reason about, not the likely answer. Prove the thread is idle
+before naming anything else.
+
+### The shedder's value inverted without anyone touching it
+
+`MAX_INFLIGHT=32` was **unchanged** across this fix, and its meaning reversed:
+
+| | per-export RSS | 32 concurrent needs | verdict |
+|---|---:|---:|---|
+| before | ~89 MiB | ~2,850 MiB | **catastrophic** — cap is 160 MiB |
+| after | ~3.6 MiB | ~115 MiB | **adequate** — fits, with 88% peak |
+
+Before the fix, admission control at 32 was 16× more permissive than the
+service could survive and provided **no protection at all**. After, the same
+number is what holds the storm at 141.3 MiB and keeps it alive. **Nobody
+retuned it. The per-request cost moved 35× underneath it.**
+
+That is the fourth cross-incident coupling and the sharpest: **a correctly
+configured limit is not a property of the limit, it is a property of the limit
+*and* the cost of the work behind it.** A number that was right yesterday is
+wrong the moment an endpoint's cost changes, and nothing in the system will say
+so.
+
+### The remaining margin is thin — state it rather than declare victory
+
+Peak RSS during the storm is **141.3 MiB against a 160 MiB cap — 88%.**
+From the sweep, ~3.6 MiB per concurrent stream over a ~27 MiB baseline:
+
+```
+safe concurrency = (160 - 27) / 3.6 ~= 37 concurrent streams
+configured MAX_INFLIGHT              = 32
+margin                               = 1.16x
+```
+
+**Raising `MAX_INFLIGHT` past ~36 brings the OOM back**, and so does growing the
+average row — the patient table is already the thing the ticket says keeps
+growing. The fix removed the *proportionality* to row count, which was the bug;
+it did not buy generous headroom. **Watch `process_resident_memory_bytes` > 140
+MiB and treat `MAX_INFLIGHT` as coupled to row width.**
+
+**Not attempted, and not claimed:** a hard cap on concurrent exports
+specifically (a per-route limit rather than a global one), which is the change
+that would actually decouple this endpoint's cost from every other route's
+admission control.
+
+
 ## Investigation — OPS-2204 — ✅ COMPLETE
 
 *Ticket:* [Nightly export crashes the service](./incidents/OPS-2204.md)
@@ -2072,11 +2187,19 @@ changes the payload is a different endpoint, not a fix.
 *Killing artifact:* any byte difference.
 
 
-## Investigation — OPS-2204 — ⛔ NOT INVESTIGATED
+## Investigation — OPS-2204 — ✅ COMPLETE (the block below is the ORIGINAL not-investigated record, preserved; the full investigation, fix and scoring are above)
 *Ticket:* [Nightly export crashes the service repeatedly](./incidents/OPS-2204.md)
 *Reproduce:* `k6 run load-tests/reproduce-OPS-2204.js`
 
-> ## ⛔ NOT INVESTIGATED — no reproduction was run, no fix attempted
+> ## ✅ SUPERSEDED — this incident was subsequently investigated and fixed
+>
+> **Everything below was written when OPS-2204 was unfinished and is preserved
+> unedited as the record of that state.** It is no longer current:
+> `reproduce-OPS-2204.js` has been run, the OOM was provoked (RestartCount 0→10,
+> exit 137), a streaming fix shipped (`c87b91c`), and P2 was scored — a **hit**.
+> `evidence/OPS-2204/` now exists. See the completed section above.
+>
+> *Original text follows.*
 >
 > Work stopped at a deadline after OPS-2201 and OPS-2202. **`reproduce-OPS-2204.js`
 > was never executed.** There is no `evidence/OPS-2204/` directory, no OOM was
@@ -2212,7 +2335,12 @@ is more informative than any individual result. Updated as each incident closes.
 | P4c | Constraint moves to **MAX_INFLIGHT=32**, ~64 admits/s | ❌ **Wrong on mechanism** — 19.8 admits/s; the **JS thread** binds | I ruled the JS thread out on CPU (~10,000/s). It binds by injecting **latency into the serialized section**, not by running out of CPU |
 | P4d | Error *rate* stays ~99.7%; served p95 falls ~20× to ~0.51 s | ⚠️ **Split** — rate ✅ 99.86%; p95 ❌ 2.39 s (4.7× high) | Same root cause as P4c |
 | P4e | Pool-25 regression closed by the fix, no revert needed | ✅ **Hit** — 0 timeouts at pool 25, no revert | Margin is **4.1×**, not the 290× claimed — the hit is on the call, not the arithmetic |
-| P2 | 2204 OOMs at 2–3 concurrent exports; exit 137 | ⏳ pending 2204 | — |
+| P2 | 2204 OOMs at 2–3 concurrent exports; exit 137 | ✅ **Hit** — dies at exactly **3**; exit 137, `OOMKilled`, RestartCount 0→10 | Correctly predicted the pool could *not* bound it: `pool.query()` frees the connection before the expensive part. 10 of 11 deaths were cgroup kills, 1 was V8's own limit — a race, not the binary P2 assumed |
+| P7a | Streaming bounds per-export RSS below +25 MiB | ✅ **Hit** — **+2.52 MiB** (was +89) | 35× reduction, an order of magnitude inside the band |
+| P7b | N=3 death threshold disappears; all 32 survive | ✅ **Hit** — 3/4/8/16/32 all survive, 0 restarts | — |
+| P7c | 50-VU storm survives with RestartCount delta 0 | ✅ **Hit** — **0**, against 10 | Least hedged of the five |
+| P7d | ≥500 exports; constraint becomes the **pool at 25** | ❌ **Wrong on both** — 356 exports; the **JS thread** binds (lag 589 ms, pool `Threads_running` 12) | Third time I named a *counted* resource over the shared thread. The thread has now been the constraint in **all four** incidents |
+| P7e | Response byte-identical | ✅ **Hit** — 36,141,185 B, deep-equal, and *faster* (0.591→0.377 s) | — |
 
 ### The incidents are not independent — one incident's FIX is a term in another's failure equation
 
@@ -2445,15 +2573,16 @@ Measured memory pressure, from evidence gathered for *other* purposes:
 
 **Ranking by blast radius (threat to overall availability at scale):**
 
-1. **OPS-2204 — nightly export (NOT INVESTIGATED, ranked on measured adjacent
-   evidence).** Ranked first despite not being worked, because it is the only
-   incident whose failure mode is **process death**, and it draws on the
-   resource with **zero elasticity**. A measured 34.47 MiB per concurrent caller
-   against a 160 MB cap, where ordinary daytime search traffic already reached
-   93%, leaves roughly **11 MiB of true headroom** when a search burst overlaps
-   the batch window. Every other incident degrades; this one kills the process
-   and takes every in-flight request with it. **This ranking is an inference
-   from adjacent measurements, not from reproducing OPS-2204.**
+1. **OPS-2204 — nightly export (INVESTIGATED AND FIXED; ranking CONFIRMED).**
+   Ranked first before it was worked, on adjacent evidence alone, because it is
+   the only incident whose failure mode is **process death** and it draws on the
+   resource with **zero elasticity**. **Reproduction confirmed the ranking and
+   was worse than the inference:** not 11 MiB of headroom but death at **3
+   concurrent exports**, and under the nightly job the service was not degraded
+   but **absent** — 1,200,251 requests, **zero** successes, `data_received = 0 B`,
+   96.28% connection-refused, RestartCount 0→10 in 121 s. Every other incident in
+   this lab is a brownout; this one is an outage. **This is the only ranking call
+   in the lab made before measurement and confirmed by it.**
 2. **OPS-2201 — search.** Measured **service-wide** blast radius, not
    endpoint-local: the untouched bystander `/api/patients/recent` degraded
    **1,400×** (0.004 s → 5.78 s) at HTTP 200. It also drove RSS to 93% of cap,
@@ -2523,7 +2652,7 @@ Per incident, and then the general rule:
 | **OPS-2201** | error rate (0.00%), `db_errors_total` (never incremented), DB health (MySQL 68–74% CPU, 65% pool idle — genuinely green) | **p95 across ALL routes.** The bystander `/recent` degraded 1,400× and generated no ticket. Also `http_requests_in_flight` ≈ 200. |
 | **OPS-2202** | error rate (0.00%, 0 of 103,760), `db_errors_total` (series never created), DB health (21% CPU, 9% pool), **the incident's own shipped `http_req_failed` gate — it PASSED**, and `nodejs_eventloop_lag_p99` (10–14 ms, flat) | **`http_requests_in_flight` = 2,005** against a steady state of <1. Also per-route p95 (36×). |
 | **OPS-2203** | **the `p(95)<1000` latency gate — it PASSED at 42.49 ms** while 99.98% of requests failed; `db_errors_total` did fire (89) but named only ER_LOCK_WAIT_TIMEOUT, giving no hint the cause was a 500 ms sleep inside a transaction | `http_requests_in_flight` = 32 pinned at the cap; served-only p95 (10.06 s vs the 42 ms aggregate); `Innodb_row_lock_current_waits` = 24 |
-| **OPS-2204** | NOT INVESTIGATED | untested |
+| **OPS-2204** | **every request-based signal, because there were no requests** — the process was dead, so `db_errors_total`, per-route p95 and `http_requests_in_flight` all reported nothing at all. k6's own `http_req_failed` gate fired, but only by seeing 100% connection-refused | `container RestartCount` and `State.ExitCode=137` / `OOMKilled=true` — **container-level, not app-level.** No in-process metric can report a process being SIGKILLed; the only witness is outside it |
 
 > **The proposed detector:**
 > 1. **`http_requests_in_flight > 2 × steady-state`, 1 min** — primary. Queue

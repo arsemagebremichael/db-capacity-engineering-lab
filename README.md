@@ -8,12 +8,16 @@
 > | **OPS-2201** | ✅ fixed & verified | **34.09 → 4,247 req/s (124.6×)**. Not from the index the ticket implied — that made the DB 2.5× faster and moved throughput +1.6% |
 > | **OPS-2202** | ✅ fixed & verified | Pool was **9% utilized**; the bottleneck was one JS thread at 3,391 req/s. Pool raise was a **documented no-op (+1.0%)** |
 > | **OPS-2203** | ✅ fixed & verified | 500 ms network call inside an X row lock. **`ER_LOCK_WAIT_TIMEOUT` 89 → 0**, admits **8.61×**. Its own `p(95)<1000` gate **PASSED at 42 ms while 99.98% of requests failed** |
-> | OPS-2204 | ⛔ **not investigated** | Never reproduced. One adjacent measurement: 1-VU export = 34.47 MiB, did not OOM |
+> | **OPS-2204** | ✅ fixed & verified | Unbounded `SELECT *` held **two** full copies. Died at **3** concurrent exports: `RestartCount` **0→10**, exit 137. Streaming: **10 → 0 restarts**, per-export RSS **35× lower** |
 >
-> **Why three of four:** each was worked to the rubric's standard — reproduce,
-> evidence, mechanism + capacity arithmetic, one concern per commit, re-measure
-> against a known noise floor. That is slower than four thin write-ups, and I
-> chose depth. The one undone is marked undone rather than padded.
+> **All four are done to the same standard** — reproduce, evidence, mechanism +
+> capacity arithmetic, one concern per commit, re-measure against a known noise
+> floor, and predictions **pre-registered before each fix and scored after,
+> hit or miss**. Across 24 predictions that scores **12 hits, 1 split, 11
+> misses** — a coin flip, and the misses are kept because the *pattern* in them
+> is the most useful thing here: the single JS thread was the binding constraint
+> in **all four** incidents, and I predicted something else in three of them.
+> What remains unmeasured is listed in [`SCARS.md`](./SCARS.md).
 >
 > ### ✅ Regression found in this submission's own code — and since fixed
 

@@ -1,0 +1,17 @@
+===============================================================================
+OPS-2204 AFTER — memory + concurrency, identical procedure to the before run
+Captured: 2026-08-18T06:58:51Z UTC   Fix commit c87b91c
+===============================================================================
+
+--- P7a: single export, RSS before/after ---
+  payload bytes=36141185  wall=0.377310s
+  docker RSS  27.2MiB / 160MiB  ->  29.72MiB / 160MiB
+  process_resident_memory_bytes{app="capacity-api"}    65.73 MiB
+  nodejs_heap_size_used_bytes{app="capacity-api"}    16.90 MiB
+
+--- P7b: concurrency sweep, same procedure as before ---
+  N=3   restarts 0->0 (delta 0) survived    200s=3/3  peak RSS=38.32 MiB
+  N=4   restarts 0->0 (delta 0) survived    200s=4/4  peak RSS=49.39 MiB
+  N=8   restarts 0->0 (delta 0) survived    200s=8/8  peak RSS=71.76 MiB
+  N=16  restarts 0->0 (delta 0) survived    200s=16/16  peak RSS=99.5 MiB
+  N=32  restarts 0->0 (delta 0) survived    200s=32/32  peak RSS=106.5 MiB

@@ -1907,167 +1907,6 @@ Each is a separate change, separately measured, and **none of them were
 attempted or verified here.**
 
 
-### Everything below is unfilled template
-
----
-
-## Investigation — OPS-2203 (template, not completed)
-
-### Hypothesis
-> Given one-at-a-time works but concurrent admits to the *same* hospital fail,
-> I think the cause is _____________________________________________________
-> and the failure will show up as ______ (a DB error? a timeout? a stall?) ___.
-
-### Observation (evidence)
-> While the reproduction runs, inspect concurrent writers to one row:
-> ```sql
-> SELECT * FROM performance_schema.data_locks\G
-> SELECT * FROM sys.innodb_lock_waits\G
-> SHOW ENGINE INNODB STATUS\G   -- TRANSACTIONS section
-> ```
-> Paste the most telling waiter/blocker rows and the failure signature you saw
-> (a DB error + code, a timeout, or stalled/near-zero throughput):
-> ```
->
-> ```
-| Metric                     | Value | vs. baseline |
-|----------------------------|-------|--------------|
-| p95 / p99 latency          |       |              |
-| Max successful admits/sec  |       |              |
-| DB error(s) + code         |       |              |
-| Error rate                 |       |              |
-
-### Root cause & mechanism
-> Explain why concurrency cannot beat serialization on a single hot row. If the
-> critical section is held for W seconds per admit, what is the theoretical max
-> throughput for that one row, regardless of how many callers pile on?
-> 1 / W = ______ admits/sec. Where does the time in the critical section go, and
-> which of the transactional guarantees is enforcing the wait? ________________
-
-### Fix & verify
-> The change you made (consider: shrinking the critical section, moving slow
-> work out of the transaction, atomic guarded updates, reducing contention on
-> the hot row): _____________________________________________________________
-> Re-measured throughput / error rate: ______________________________________
-
----
-
----
-
-### Result and scoring — P7a–P7e: 3 hits, 1 split, 1 miss
-
-*Fix:* `c87b91c`. *Predictions:* `f736741`, committed before the code moved.
-*Run:* identical script, 50 VUs, 2 min, `MAX_INFLIGHT=32` and pool 25 unchanged.
-
-| metric | before | after | |
-|---|---:|---:|---|
-| **`RestartCount` over the 2-min run** | **10** | **0** | the headline |
-| exit state | `137`, `OOMKilled=true` | clean, `running` | |
-| successful exports | **0** | **356** | |
-| `data_received` | **0 B** | **13 GB** | |
-| RSS delta, one export | **+89 MiB** | **+2.52 MiB** | **35× less** |
-| dies at N concurrent | **3** | **survives 32** | |
-| peak RSS, 32 concurrent | *dead* | 106.5 MiB | |
-| peak RSS, 50-VU storm | *dead* | 141.3 MiB (88% of cap) | |
-| payload | 36,141,185 B | 36,141,185 B | byte-identical |
-
-**P7a — peak RSS bounded, delta below +25 MiB. ✅ HIT, with room.**
-One export moves RSS 27.2 → 29.72 MiB, a **+2.52 MiB** delta against +89 MiB
-before — an order of magnitude inside the predicted band. The concurrency sweep
-confirms it is no longer proportional to the result set: N=3 → 38.3 MiB,
-N=8 → 71.8, N=16 → 99.5, N=32 → 106.5.
-
-**P7b — the N=3 death threshold disappears. ✅ HIT, including the stronger form.**
-N = 3, 4, 8, 16 and 32 all survive with `RestartCount` delta **0** and every
-request returning 200 (3/3, 4/4, 8/8, 16/16, 32/32).
-
-**P7c — the 50-VU storm survives with zero restarts. ✅ HIT.**
-`RestartCount` delta **exactly 0** across the full 2-minute run, against 10
-before. The least hedged of the five, and it held.
-
-**P7e — response byte-identical. ✅ HIT.**
-36,141,185 bytes, `count: 100000`, deep-equal to the pre-fix payload, and
-*faster* uncontended: 0.591 s → 0.377 s.
-
-**P7d — ≥500 exports, constraint becomes the pool at 25. ❌ MISS on both.**
-Measured **356** exports, not ≥500. And the constraint is **not** the pool:
-
-```
-during the storm:
-  nodejs_eventloop_lag_mean   589 ms      (12 ms idle, 29 ms in OPS-2203)
-  http_requests_in_flight      32         pinned at MAX_INFLIGHT
-  MySQL Threads_connected      26
-  MySQL Threads_running        12         <-- pool has SPARE capacity
-```
-
-The pool is not saturated. **The single JS thread is**, at a lag of 589 ms —
-twenty times the 29 ms that was enough to inflate OPS-2203's lock hold 73×.
-Streaming replaced one bulk `JSON.stringify` with **100,000 per-row
-`stringify` + `write()` pairs per export**, ~300k/s across the run. It traded
-peak memory for per-row CPU, and the CPU is what now runs out.
-
-### I named the wrong constraint twice in two incidents, the same way
-
-| | I predicted | Actually bound |
-|---|---|---|
-| OPS-2203 P4c | shedder (`MAX_INFLIGHT=32`) | **the JS thread** |
-| OPS-2204 P7d | pool (25 connections) | **the JS thread** |
-
-Both times I named a **counted resource** — in-flight slots, pool connections —
-because those have obvious numbers attached and the arithmetic is satisfying.
-Both times the answer was the **shared, uncounted thread**. This lab has now
-found the single JS thread to be the binding constraint in **OPS-2201, OPS-2202,
-OPS-2203 and OPS-2204** — every incident — and I have predicted something else
-in three of the four.
-
-**The rule:** in a single-threaded runtime, the default hypothesis for any
-capacity question is the thread. A resource with a configured limit is the
-*easy* thing to reason about, not the likely answer. Prove the thread is idle
-before naming anything else.
-
-### The shedder's value inverted without anyone touching it
-
-`MAX_INFLIGHT=32` was **unchanged** across this fix, and its meaning reversed:
-
-| | per-export RSS | 32 concurrent needs | verdict |
-|---|---:|---:|---|
-| before | ~89 MiB | ~2,850 MiB | **catastrophic** — cap is 160 MiB |
-| after | ~3.6 MiB | ~115 MiB | **adequate** — fits, with 88% peak |
-
-Before the fix, admission control at 32 was 16× more permissive than the
-service could survive and provided **no protection at all**. After, the same
-number is what holds the storm at 141.3 MiB and keeps it alive. **Nobody
-retuned it. The per-request cost moved 35× underneath it.**
-
-That is the fourth cross-incident coupling and the sharpest: **a correctly
-configured limit is not a property of the limit, it is a property of the limit
-*and* the cost of the work behind it.** A number that was right yesterday is
-wrong the moment an endpoint's cost changes, and nothing in the system will say
-so.
-
-### The remaining margin is thin — state it rather than declare victory
-
-Peak RSS during the storm is **141.3 MiB against a 160 MiB cap — 88%.**
-From the sweep, ~3.6 MiB per concurrent stream over a ~27 MiB baseline:
-
-```
-safe concurrency = (160 - 27) / 3.6 ~= 37 concurrent streams
-configured MAX_INFLIGHT              = 32
-margin                               = 1.16x
-```
-
-**Raising `MAX_INFLIGHT` past ~36 brings the OOM back**, and so does growing the
-average row — the patient table is already the thing the ticket says keeps
-growing. The fix removed the *proportionality* to row count, which was the bug;
-it did not buy generous headroom. **Watch `process_resident_memory_bytes` > 140
-MiB and treat `MAX_INFLIGHT` as coupled to row width.**
-
-**Not attempted, and not claimed:** a hard cap on concurrent exports
-specifically (a per-route limit rather than a global one), which is the change
-that would actually decouple this endpoint's cost from every other route's
-admission control.
-
-
 ## Investigation — OPS-2204 — ✅ COMPLETE
 
 *Ticket:* [Nightly export crashes the service](./incidents/OPS-2204.md)
@@ -2187,7 +2026,121 @@ changes the payload is a different endpoint, not a fix.
 *Killing artifact:* any byte difference.
 
 
-## Investigation — OPS-2204 — ✅ COMPLETE (the block below is the ORIGINAL not-investigated record, preserved; the full investigation, fix and scoring are above)
+### Result and scoring — P7a–P7e: 4 hits, 1 miss
+
+*Fix:* `c87b91c`. *Predictions:* `f736741`, committed before the code moved.
+*Run:* identical script, 50 VUs, 2 min, `MAX_INFLIGHT=32` and pool 25 unchanged.
+
+| metric | before | after | |
+|---|---:|---:|---|
+| **`RestartCount` over the 2-min run** | **10** | **0** | the headline |
+| exit state | `137`, `OOMKilled=true` | clean, `running` | |
+| successful exports | **0** | **356** | |
+| `data_received` | **0 B** | **13 GB** | |
+| RSS delta, one export | **+89 MiB** | **+2.52 MiB** | **35× less** |
+| dies at N concurrent | **3** | **survives 32** | |
+| peak RSS, 32 concurrent | *dead* | 106.5 MiB | |
+| peak RSS, 50-VU storm | *dead* | 141.3 MiB (88% of cap) | |
+| payload | 36,141,185 B | 36,141,185 B | byte-identical |
+
+**P7a — peak RSS bounded, delta below +25 MiB. ✅ HIT, with room.**
+One export moves RSS 27.2 → 29.72 MiB, a **+2.52 MiB** delta against +89 MiB
+before — an order of magnitude inside the predicted band. The concurrency sweep
+confirms it is no longer proportional to the result set: N=3 → 38.3 MiB,
+N=8 → 71.8, N=16 → 99.5, N=32 → 106.5.
+
+**P7b — the N=3 death threshold disappears. ✅ HIT, including the stronger form.**
+N = 3, 4, 8, 16 and 32 all survive with `RestartCount` delta **0** and every
+request returning 200 (3/3, 4/4, 8/8, 16/16, 32/32).
+
+**P7c — the 50-VU storm survives with zero restarts. ✅ HIT.**
+`RestartCount` delta **exactly 0** across the full 2-minute run, against 10
+before. The least hedged of the five, and it held.
+
+**P7e — response byte-identical. ✅ HIT.**
+36,141,185 bytes, `count: 100000`, deep-equal to the pre-fix payload, and
+*faster* uncontended: 0.591 s → 0.377 s.
+
+**P7d — ≥500 exports, constraint becomes the pool at 25. ❌ MISS on both.**
+Measured **356** exports, not ≥500. And the constraint is **not** the pool:
+
+```
+during the storm:
+  nodejs_eventloop_lag_mean   589 ms      (12 ms idle, 29 ms in OPS-2203)
+  http_requests_in_flight      32         pinned at MAX_INFLIGHT
+  MySQL Threads_connected      26
+  MySQL Threads_running        12         <-- pool has SPARE capacity
+```
+
+The pool is not saturated. **The single JS thread is**, at a lag of 589 ms —
+twenty times the 29 ms that was enough to inflate OPS-2203's lock hold 73×.
+Streaming replaced one bulk `JSON.stringify` with **100,000 per-row
+`stringify` + `write()` pairs per export**, ~300k/s across the run. It traded
+peak memory for per-row CPU, and the CPU is what now runs out.
+
+### I named the wrong constraint twice in two incidents, the same way
+
+| | I predicted | Actually bound |
+|---|---|---|
+| OPS-2203 P4c | shedder (`MAX_INFLIGHT=32`) | **the JS thread** |
+| OPS-2204 P7d | pool (25 connections) | **the JS thread** |
+
+Both times I named a **counted resource** — in-flight slots, pool connections —
+because those have obvious numbers attached and the arithmetic is satisfying.
+Both times the answer was the **shared, uncounted thread**. This lab has now
+found the single JS thread to be the binding constraint in **OPS-2201, OPS-2202,
+OPS-2203 and OPS-2204** — every incident — and I have predicted something else
+in three of the four.
+
+**The rule:** in a single-threaded runtime, the default hypothesis for any
+capacity question is the thread. A resource with a configured limit is the
+*easy* thing to reason about, not the likely answer. Prove the thread is idle
+before naming anything else.
+
+### The shedder's value inverted without anyone touching it
+
+`MAX_INFLIGHT=32` was **unchanged** across this fix, and its meaning reversed:
+
+| | per-export RSS | 32 concurrent needs | verdict |
+|---|---:|---:|---|
+| before | ~89 MiB | ~2,850 MiB | **catastrophic** — cap is 160 MiB |
+| after | ~3.6 MiB | ~115 MiB | **adequate** — fits, with 88% peak |
+
+Before the fix, admission control at 32 was 16× more permissive than the
+service could survive and provided **no protection at all**. After, the same
+number is what holds the storm at 141.3 MiB and keeps it alive. **Nobody
+retuned it. The per-request cost moved 35× underneath it.**
+
+That is the fourth cross-incident coupling and the sharpest: **a correctly
+configured limit is not a property of the limit, it is a property of the limit
+*and* the cost of the work behind it.** A number that was right yesterday is
+wrong the moment an endpoint's cost changes, and nothing in the system will say
+so.
+
+### The remaining margin is thin — state it rather than declare victory
+
+Peak RSS during the storm is **141.3 MiB against a 160 MiB cap — 88%.**
+From the sweep, ~3.6 MiB per concurrent stream over a ~27 MiB baseline:
+
+```
+safe concurrency = (160 - 27) / 3.6 ~= 37 concurrent streams
+configured MAX_INFLIGHT              = 32
+margin                               = 1.16x
+```
+
+**Raising `MAX_INFLIGHT` past ~36 brings the OOM back**, and so does growing the
+average row — the patient table is already the thing the ticket says keeps
+growing. The fix removed the *proportionality* to row count, which was the bug;
+it did not buy generous headroom. **Watch `process_resident_memory_bytes` > 140
+MiB and treat `MAX_INFLIGHT` as coupled to row width.**
+
+**Not attempted, and not claimed:** a hard cap on concurrent exports
+specifically (a per-route limit rather than a global one), which is the change
+that would actually decouple this endpoint's cost from every other route's
+admission control.
+
+
+## OPS-2204 — the ORIGINAL not-investigated record (superseded, preserved unedited)
 *Ticket:* [Nightly export crashes the service repeatedly](./incidents/OPS-2204.md)
 *Reproduce:* `k6 run load-tests/reproduce-OPS-2204.js`
 
@@ -2261,52 +2214,6 @@ threshold **below 1 concurrent export**. Untested.
 `nodejs_heap_size_used_bytes` may never record the excursion that killed the
 process. Detecting this class likely needs `container_memory_working_set_bytes`
 (cAdvisor) plus restart-count alerting — **neither is wired up in this stack.**
-
-### Everything below is unfilled template
-
----
-
-## Investigation — OPS-2204 (template, not completed)
-
-### Hypothesis
-> Given memory spikes right before each restart and only the big export is
-> affected, I think the cause is ___________________________________________
-> because __________________________________________________________________.
-
-### Observation (evidence)
-> Watch `nodejs_heap_size_used_bytes`, GC pauses, and restarts:
-> ```bash
-> docker stats
-> docker compose logs -f capacity-api
-> ```
-| Metric                          | Value |
-|---------------------------------|-------|
-| Approx. payload size per request|       |
-| Peak heap before crash          |       |
-| Time-to-first-crash             |       |
-| Container restart count         |       |
-| GC pause trend                  |       |
-
-> Paste the crash / exit log lines:
-> ```
->
-> ```
-
-### Root cause & mechanism
-> Estimate per-row size, then the full payload: rows × bytes/row = ______ MB.
-> With C concurrent callers, peak resident memory ≈ ______ MB — compare to the
-> container's memory budget (160MB locally / 256MB in prod). Explain what happens
-> to GC frequency, CPU, and
-> throughput as live heap approaches the limit, and why the current approach
-> uses O(N) memory while a better one could use far less. ____________________
-
-### Fix & verify
-> The change you made (consider: bounding how much of the result set is in
-> memory at once, streaming to the response, sensible page sizes, compression):
-> ____________________________________________________________________________
-> Re-run evidence — new peak heap: ______  restarts: ______  error rate: ______
-
----
 
 ## Post-incident review (synthesis)
 

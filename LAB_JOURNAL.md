@@ -1554,6 +1554,158 @@ a row lock while the enlarged pool absorbs the waiters, `http_requests_in_flight
 may stay **low** while throughput collapses to ~2/s. An app-tier queue-depth
 gauge cannot see a queue that formed inside InnoDB.
 
+---
+
+## OPS-2203 — PRE-REGISTERED PREDICTIONS for the real fix (P4)
+
+> **Written and committed BEFORE the code change.** Commit `5482954` holds the
+> before-run; this block lands before `notifyBedRegistry` moves. Every number
+> below is either measured or derived from a measured number, and each states
+> the artifact that would kill it. Scored verbatim in step 6, hit or miss.
+
+### The measured inputs (not estimates)
+
+| Quantity | Value | Source |
+|---|---:|---|
+| `W_lock` **before** — critical section incl. `notifyBedRegistry` | **508.86 ms** | `evidence/baseline/service-time-1vu.txt` |
+| `W_lock` **after** — `UPDATE` → `COMMIT` returns, from Node | **0.690 ms** avg | measured, n=250, idle DB, 50 warm-up discarded |
+| — same, distribution | p50 0.686 / p95 0.891 / **p99 1.023** / max 1.157 ms | same |
+| Whole txn `BEGIN`→`COMMIT` | 0.745 ms avg | same |
+| Server-side `UPDATE`+`COMMIT` only (no RTT) | 0.579 ms | `CALL bench_update(200)` in MySQL |
+| `innodb_lock_wait_timeout` | 5 s | `SHOW VARIABLES` |
+| MySQL version | **8.0.46** | `SELECT VERSION()` |
+
+The critical section shrinks by a factor of **508.86 / 0.690 = 738×**.
+
+### P4a — the crossover N moves from ~11 to ~7,250
+
+Same model as P1-corollary, new hold time. The last waiter's wait is
+`(N−1) × W_lock`; it crosses the 5 s timeout at:
+
+```
+before:  N − 1 = 5000 / 508.86  =    9.8   ->  N ≈ 11
+after:   N − 1 = 5000 / 0.690   = 7246.4   ->  N ≈ 7,247
+```
+
+Conservatively, using the measured **p99** hold of 1.023 ms rather than the mean:
+`N = 5000 / 1.023 ≈ 4,889`. Both are three orders of magnitude above any
+concurrency this system can reach.
+
+*Prediction:* **crossover N ≈ 7,250** (conservative floor ≈ 4,890).
+*Killing artifact:* any post-fix `ER_LOCK_WAIT_TIMEOUT` at all.
+
+### P4b — timeout count at concurrency 25 is exactly ZERO
+
+At the shipped pool of 25 the deepest possible queue is 24 waiters:
+
+```
+worst-case wait = 24 × 0.690 ms = 16.6 ms   vs   5,000 ms timeout
+margin = 5000 / 16.6 = 302×
+```
+
+Even at the p99 hold: `24 × 1.023 = 24.6 ms`, still a **203×** margin.
+
+*Prediction:* **`ER_LOCK_WAIT_TIMEOUT` = 0.** Not "near zero" — **exactly zero**.
+This is the least hedged prediction in the lab: a single 1205 kills it.
+*Killing artifact:* the post-fix error-code breakdown, captured either way.
+
+### P4c — the constraint moves to the SHEDDER at ~64 admits/s
+
+**This is the forward call.** With the row lock no longer binding, four
+candidates remain. Post-fix, a request holds a **pool connection for 0.745 ms**
+but an **in-flight slot for ~500.7 ms**, because `notifyBedRegistry` leaves the
+transaction but stays on the request path:
+
+| Candidate | Capacity | Arithmetic | Binds? |
+|---|---:|---|:--:|
+| InnoDB row lock | 1,450 /s | `1 / 0.690 ms` | no |
+| Pool = 25 | 33,557 /s | `25 / 0.745 ms` | no |
+| **Shedder MAX_INFLIGHT = 32** | **63.9 /s** | **`32 / 500.7 ms`** | **YES** |
+| JS thread (single, ~0.1 ms CPU/req) | ~10,000 /s | `1 / 0.1 ms` | no |
+
+*Prediction:* the binding constraint becomes **`MAX_INFLIGHT = 32`**, and
+admitted throughput lands at **≈ 64 admits/s** (band 55–75 to absorb contention
+on the hold time under real load). In 30 s that is **≈ 1,900 admits**
+(band 1,650–2,250), against **69** before — a **≈ 28×** improvement.
+
+The pool at 25 does **not** become the constraint, and it is emphatically not
+the row lock. If the measured post-fix throughput lands near 1,450 /s the lock
+model is wrong; near 33,000 /s the pool model is wrong.
+
+*Killing artifact:* post-fix admitted count and `http_requests_in_flight`.
+
+### P4d — the error RATE does not improve, and that is not a failure
+
+Blunt, because it would otherwise read as a regression. Offered load stays ~500
+VUs. With 32 slots held 500 ms each, ~468 VUs keep spinning on instant
+rejections, so the offered rate stays ~10–11 k/s and **~426 k requests are still
+shed with 503**. `http_req_failed` therefore stays **≈ 99.7%**, barely moved
+from 99.98%.
+
+What changes is the *kind* of failure and the cost of it:
+
+| | Before | Predicted after |
+|---|---:|---:|
+| `500` ER_LOCK_WAIT_TIMEOUT | 89 | **0** |
+| `503` shed (honest backpressure) | 426,050 | ~426,000 |
+| `200` admitted | 69 | **~1,900** |
+| Served p95 (`expected_response:true`) | 10.06 s | **~0.51 s** |
+
+*Prediction:* 500-class errors vanish; 503s persist; **served p95 falls ~20×**
+to ≈ 505–520 ms, which is the `notifyBedRegistry` cost now dominating a request
+that no longer waits on a lock. A run that shows 500s surviving kills P4b; one
+that shows 503s vanishing means the offered-load model is wrong.
+
+### P4e — the pool-25 regression is CLOSED by this fix, not by reverting
+
+The submission flagged OPS-2202's pool raise (2 → 25) as a possible regression
+in the admit path, with a revert held in reserve. P4a moves the crossover to
+≈ 7,250, which puts the shipped pool of 25 at **0.34% of the safe ceiling** —
+a 290× margin.
+
+*Prediction:* **the regression is closed by shrinking the critical section, and
+the pool raise needs no revert.** Pool 25 becomes safe *because* the fix removes
+what made it unsafe, not because 25 was ever the right number on its own.
+Recomputed properly in step 7 — and **not changed without measuring**.
+*Killing artifact:* any post-fix 1205 at pool 25 (which is also P4b's killer).
+
+### Residual from the before-run: 56.3% measured vs 60% modelled
+
+The waiter-position model predicted 15 of 25 slots timing out (**60%**);
+measured **56.3%** (89/158). The 3.7-point gap is ≈ 5.8 transactions — about one
+slot in 25 — and it is attributable, not noise.
+
+**Primary cause: the queue-fill transient.** The run contains exactly one ramp
+from an empty queue. During the fill, transactions at positions 0–9 commit
+without any predecessor having timed out; in steady state those slots are
+refilled by waiters that already burned 5 s. Steady state on 158 transactions
+predicts 94.8 timeouts / 63.2 successes; measured 89 / 69 — a one-time donation
+of **5.8 successes**, which is one queue-fill's worth and matches the observed
+gap to within 0.1 point. **This is arithmetically sufficient on its own.**
+
+**Secondary, confirmed present but not separable: lock scheduling is not FIFO.**
+MySQL is **8.0.46**, and CATS (Contention-Aware Transaction Scheduling) has been
+the *only* lock-scheduling algorithm since 8.0.20 — the FIFO/VATS toggle was
+removed, so there is no configuration under which the model's FIFO assumption
+holds. CATS grants by how many transactions a waiter blocks, not by arrival
+order.
+
+**Corroborating measurement.** Strict FIFO at depth 25 predicts a mean wait among
+waiters of:
+
+```
+[ 0.50886 × (1+2+…+9) + 15 × 5000 ] / 24  =  ( 22,899 + 75,000 ) / 24  =  4,079 ms
+```
+
+Measured `Innodb_row_lock_time_avg` = **3,591 ms** — 488 ms *below* the FIFO
+prediction, the direction both mechanisms push. Consistent with both; it
+separates neither.
+
+*Verdict:* **primary = queue-fill transient (sufficient alone, magnitude matches);
+secondary = CATS non-FIFO (present by version, magnitude unresolved).** Stated
+as attribution with a named residual, not as agreement.
+
+
 ### Everything below is unfilled template
 
 ---
@@ -1732,9 +1884,39 @@ is more informative than any individual result. Updated as each incident closes.
 | P5b | Admitted throughput 2,000–3,300 | ❌ **Missed** — 452 req/s | Same cause. I flagged the closed-loop effect for P5c and **failed to propagate it** into P5a/P5b |
 | P5c | Rejection rate > 50% | ✅ **Hit** — 93.6% | The one I marked "soft" is the one that held |
 | P6 | Clustering 2–3.5×, same collapse shape | ❌ **Half** — 1.48× peak, then **negative** (0.50× at 4 workers); shape ✅ unchanged (0.00% errors throughout) | Expected sub-linear CPU scaling; got **memory** exhaustion. Workers are bounded by heap, not cores |
-| P1 | 2203 is not a lock-timeout incident; near-zero 1205s | ⏳ pending 2203 | — |
-| P1-corollary | Fixing 2202's pool will *create* 1205s in 2203 | ⏳ pending 2203 | — |
+| P1 | 2203 is not a lock-timeout incident; near-zero 1205s | ❌ **Wrong** — 89 lock-wait timeouts at pool 25 | The ticket's "failed with a database error" was right and I was wrong. P1 reasoned from `connectionLimit: 2`, which OPS-2202 had already changed to 25 — I predicted against a config that no longer existed |
+| P1-corollary | Fixing 2202's pool will *create* 1205s in 2203 | ✅ **Hit** — 0 at pool 2, 89 at pool 25, control arm included | A fix in one incident manufactured the failure mode of another. Strongest single piece of evidence that these are one capacity system, not four bugs |
+| P4a | Crossover N moves ~11 → ~7,250 once the 500 ms leaves the txn | ⏳ pending step 6 | — |
+| P4b | Post-fix `ER_LOCK_WAIT_TIMEOUT` **exactly zero** at pool 25 | ⏳ pending step 6 | — |
+| P4c | Constraint moves to **MAX_INFLIGHT=32**, ~64 admits/s | ⏳ pending step 6 | — |
+| P4d | Error *rate* stays ~99.7%; served p95 falls ~20× to ~0.51 s | ⏳ pending step 6 | — |
+| P4e | Pool-25 regression closed by the fix, no revert needed | ⏳ pending step 6 | — |
 | P2 | 2204 OOMs at 2–3 concurrent exports; exit 137 | ⏳ pending 2204 | — |
+
+### The shipped gates failed three different ways for one reason
+
+**One line, because it is one defect:** every threshold in this lab aggregates
+over *all* outcomes, so each one was blinded by whichever outcome was cheapest —
+error gates blind in 2201 and 2202 because the failures were slow *successes*,
+and the latency gate in 2203 **inverted** because the failures were fast
+*rejections*.
+
+| Incident | Gate | What it reported | Truth |
+|---|---|---|---|
+| 2201 | error-rate | 0.00% errors | 34 req/s ceiling, p95 7 s — a brownout with no errors to count |
+| 2202 | error-rate | 0.00% errors, 2,005 sockets accepted | 36× brownout; the failure was latency, never an error |
+| 2203 | `p(95)<1000` **latency** | **PASS at 42.49 ms** | 99.98% of requests failed; p95 over *served* requests was **10.06 s** |
+
+2203 is the sharpest form: the gate did not merely miss the failure, it was
+**pushed the right way by it**. 426,050 shed requests returned in ~0.5 ms and
+dragged the aggregate p95 down, so the worse the incident got, the healthier the
+gate looked. An error-rate gate fails open when failures are slow; a latency
+gate fails open when failures are fast. Same defect, opposite symptom.
+
+**Rule:** never gate on an aggregate over mixed outcomes. Gate on
+`p95{outcome="served"}` and on the shed/served *ratio* as a separate signal —
+k6 already computes the honest number as `{ expected_response:true }`, and this
+lab passed a threshold three times while sitting on top of it.
 
 ### The detector I proposed after one incident was falsified by the next
 

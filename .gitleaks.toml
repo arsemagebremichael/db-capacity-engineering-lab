@@ -1,5 +1,12 @@
 title = "regional-health-platform"
 
+# REQUIRED. A config with only an [allowlist] REPLACES the default ruleset
+# rather than extending it, so gitleaks loads zero rules and reports "no leaks
+# found" on anything — including a plaintext private key. Verified: without
+# this block a bare AWS key scans clean.
+[extend]
+useDefault = true
+
 # Generated during `make up` / `make verify`. Hostnames in apply.log / seed.log
 # are not committed credentials; scanning them after apply false-fails C8.
 [allowlist]
@@ -8,4 +15,9 @@ paths = [
   '''(^|/)\.terraform/''',
   '''(^|/)\.tflocal/''',
   '''(^|/)node_modules/''',
+  # Template with empty values only — generic-api-key matches the variable
+  # NAME across lines 9-10. Verified the committed value is zero-length.
+  # Trade-off: a real value pasted in here would now be missed, so treat
+  # .env.example as append-only placeholders and never as a scratchpad.
+  '''(^|/)\.env\.example$''',
 ]

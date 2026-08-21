@@ -184,3 +184,105 @@ docker compose down -v
 ```
 
 Good luck, on-call. 📟
+
+---
+
+# Assignment 2 — rehosted to the cloud
+
+This repo is the **individual rehost**. The shared modules and the golden
+pipeline live in the group platform,
+[akezasaloi/regional-health-platform](https://github.com/akezasaloi/regional-health-platform),
+and are consumed here by pinned commit SHA — `terraform/main.tf` for the
+modules, `.github/workflows/ci.yml` for the pipeline.
+
+## Stand it up
+
+```bash
+export LOCALSTACK_AUTH_TOKEN=...   # app.localstack.cloud -> Auth Tokens
+export AIVEN_HOST=...              # your own Aiven MySQL, not a teammate's
+export AIVEN_PORT=...
+export AIVEN_USER=avnadmin
+export AIVEN_PASSWORD=...
+export AIVEN_DB=capacity_lab
+export AIVEN_CA_PATH=./secrets/aiven-ca.pem   # optional: VERIFY_CA instead of REQUIRED
+
+./bootstrap/tfstate.sh
+tflocal -chdir=terraform init -backend-config=backend.hcl
+make up
+make verify
+```
+
+Linux only. Docker Desktop on macOS does not expose the bridge network, so
+LocalStack's EC2 instances are unreachable from the host — use the Codespace.
+
+Enable the local secret gate once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+## Where the database went
+
+RDS is not on the LocalStack Hobby licence — `aws_db_instance` returns `501`.
+MySQL is therefore a real managed **Aiven** service. Terraform never creates the
+database; it writes the connection envelope (`engine`, `username`, `password`,
+`host`, `port`, `dbname`) into Secrets Manager, and the app calls
+`GetSecretValue` at boot. The secret value never reaches the repo, the image, or
+user-data — user-data receives only the ARN and the endpoint.
+
+One operational wrinkle worth knowing before you re-run this: the Aiven free
+plan **powers off after a couple of days idle** and withdraws its DNS record, so
+the host stops resolving entirely. Wake it in the console first; `make up` will
+otherwise fail at the seed step with what looks like a code regression.
+
+## Deploy identity: OIDC instead of long-lived keys (E2)
+
+CI holds no AWS keys in the production design. The deploy job would mint a
+short-lived GitHub OIDC token and exchange it for a role via
+`sts:AssumeRoleWithWebIdentity`. The commented `configure-aws-credentials` block
+sits in the group platform's `ci.yml`; the trust policy is
+[`docs/oidc-trust-policy.json`](docs/oidc-trust-policy.json). It is not enabled
+here because LocalStack accepts `test`/`test` — there is nothing to federate
+against.
+
+The whole security of the arrangement rests on one condition:
+
+```json
+"token.actions.githubusercontent.com:sub":
+  "repo:akezasaloi/regional-health-platform:ref:refs/heads/main"
+```
+
+### What breaks if `sub` is `repo:<org>/*`
+
+That wildcard says *"any workflow, in any repository in this org, on any ref,
+may assume this role."* Three things break, in increasing order of severity.
+
+**1. Every branch becomes production.** `ref:refs/heads/main` is what ties the
+credential to reviewed code. Drop it and any branch can assume the role — and
+anyone who can push a branch can push a workflow file. Opening a PR that adds
+`.github/workflows/evil.yml` is then enough to read production secrets, with no
+review. Branch protection does not help: the workflow runs *before* anything
+merges.
+
+**2. Every repository in the org becomes production.** A wildcard over `<org>/*`
+means the newest, least-guarded repo — a prototype, a fork, an archived service
+nobody watches — can assume the same role as the deploy pipeline. The blast
+radius becomes the weakest repo in the organisation, and it grows every time
+someone clicks "New repository".
+
+**3. It fails open, and silently.** A too-narrow `sub` breaks loudly: the job
+cannot assume the role and CI goes red. A too-broad one works perfectly, forever,
+and nothing in any log distinguishes a legitimate deploy from an attacker's
+workflow — both present a valid token for the same role. There is no failure to
+detect, which is why it has to be right at write time rather than found in an
+incident review.
+
+The same reasoning applies to `aud`: pinning it to `sts.amazonaws.com` stops a
+token minted for another audience being replayed here.
+
+The sharp version: the `sub` claim is an *authorisation* decision wearing
+authentication's clothing. The OIDC token proves *which workflow* is asking —
+GitHub signs it and it cannot be spoofed. The trust policy decides *which of
+those workflows is allowed*. Widening `sub` does not weaken the cryptography at
+all; it tells AWS to accept a much larger set of provably-genuine callers. The
+signature stays perfect while the guarantee becomes worthless.

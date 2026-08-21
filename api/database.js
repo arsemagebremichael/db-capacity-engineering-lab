@@ -51,6 +51,44 @@ const MONGO_DB_NAME = process.env.MONGO_DB || 'capacity_lab';
 // ---------------------------------------------------------------------------
 let pool;
 
+/**
+ * Repoint the pool at the credentials resolved from Secrets Manager (C3).
+ * Called once at boot, before the first query. Aiven requires TLS.
+ */
+function applySecret(secret) {
+  MYSQL_CONFIG.host = secret.host;
+  MYSQL_CONFIG.port = Number(secret.port);
+  MYSQL_CONFIG.user = secret.username;
+  MYSQL_CONFIG.password = secret.password;
+  MYSQL_CONFIG.database = secret.dbname;
+  // Aiven enforces TLS. VERIFY_CA would need the CA bundle inside the image;
+  // REQUIRED gives an encrypted transport, which is what C3 is about.
+  MYSQL_CONFIG.ssl = { rejectUnauthorized: false };
+  pool = undefined;
+}
+
+/**
+ * Pool occupancy for /readyz (C4). mysql2 has used both arrays and Denque for
+ * these internals across versions, so read defensively — a readiness probe
+ * must never throw.
+ */
+function poolStats() {
+  const size = (c) => {
+    if (!c) return 0;
+    if (typeof c.length === 'number') return c.length;
+    if (typeof c.size === 'function') return c.size();
+    return 0;
+  };
+  const inner = pool && pool.pool ? pool.pool : null;
+  if (!inner) return { limit: MYSQL_CONFIG.connectionLimit, all: 0, free: 0, queued: 0 };
+  return {
+    limit: MYSQL_CONFIG.connectionLimit,
+    all: size(inner._allConnections),
+    free: size(inner._freeConnections),
+    queued: size(inner._connectionQueue),
+  };
+}
+
 function getPool() {
   if (!pool) {
     pool = mysql.createPool(MYSQL_CONFIG);
@@ -93,6 +131,8 @@ async function closeAll() {
 
 module.exports = {
   MYSQL_CONFIG,
+  applySecret,
+  poolStats,
   MONGO_URI,
   MONGO_DB_NAME,
   getPool,

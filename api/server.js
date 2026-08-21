@@ -12,12 +12,16 @@
  *   GET  /api/patients/export        Full patient export for the analytics team
  *   GET  /api/audit/ping             Mongo audit-store health probe
  *   GET  /metrics                    Prometheus metrics
+ *   GET  /healthz                    liveness — process is up
+ *   GET  /readyz                     readiness — 503 if it cannot serve
+ *   GET  /debug/secret-source        Secrets Manager ARN + version (C3)
  */
 
 const cluster = require('node:cluster');
 const express = require('express');
 const client = require('prom-client');
-const { getPool, getMongo } = require('./database');
+const { getPool, getMongo, applySecret, poolStats } = require('./database');
+const { loadDbCredentials, getSecretSource, secretResolved } = require('./secrets');
 
 const app = express();
 app.use(express.json());
@@ -154,6 +158,51 @@ app.use((req, res, next) => {
 // Health & metrics
 // ---------------------------------------------------------------------------
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// --- C4: liveness and readiness mean different things ------------------------
+// /healthz answers as long as the process is up. It must NOT touch the DB:
+// a liveness probe that fails on a DB blip gets the container killed and
+// restarted, turning a recoverable dependency outage into an outage of its own.
+app.get('/healthz', (_req, res) => res.json({ status: 'ok', pid: process.pid }));
+
+// /readyz answers only if this instance can actually serve. nginx uses it for
+// upstream health, so a 503 here takes this box out of rotation rather than
+// letting it accept traffic it will fail.
+app.get('/readyz', async (_req, res) => {
+  const checks = { secret: 'ok', pool: 'ok', admission: 'ok', db: 'ok' };
+
+  // 1. credentials never resolved from Secrets Manager — the env fallback is
+  //    not a ready state for a deployed instance (C3).
+  if (!secretResolved()) checks.secret = 'unresolved';
+
+  // 2. pool saturated. queueLimit is 0, so saturation shows up as latency
+  //    rather than errors — the OPS-2202 failure mode exactly. Readiness is
+  //    where that becomes visible to the load balancer.
+  const stats = poolStats();
+  if (stats.free === 0 && stats.queued > 0) {
+    checks.pool = `saturated (${stats.all}/${stats.limit} busy, ${stats.queued} queued)`;
+  }
+
+  // 3. admission control already shedding — this worker is at its ceiling.
+  if (inFlight >= MAX_INFLIGHT) checks.admission = `at capacity (${inFlight}/${MAX_INFLIGHT})`;
+
+  // 4. the database itself
+  try {
+    await getPool().query('SELECT 1');
+  } catch (err) {
+    checks.db = err.code || err.message;
+  }
+
+  const ready = Object.values(checks).every((v) => v === 'ok');
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not-ready', checks });
+});
+
+// C3 evidence: which secret, and which version of it, this process booted with.
+// ARN and version only — never the envelope.
+app.get('/debug/secret-source', (_req, res) => {
+  const src = getSecretSource();
+  res.status(src.arn && src.arn !== 'env' ? 200 : 503).json(src);
+});
 
 app.get('/metrics', async (_req, res) => {
   res.set('Content-Type', register.contentType);
@@ -388,8 +437,21 @@ if (WORKERS > 1 && cluster.isPrimary) {
     cluster.fork();
   });
 } else {
-  app.listen(PORT, () => {
-    // eslint-disable-next-line no-console
-    console.log(`capacity-api listening on :${PORT} (metrics at /metrics, pid ${process.pid}, in-flight cap ${MAX_INFLIGHT})`);
-  });
+  // C3: resolve DB credentials from Secrets Manager BEFORE accepting traffic.
+  // Each worker loads its own copy — the primary never serves, so it has no
+  // need for them. Failing closed here is deliberate: an instance that cannot
+  // reach its secret must not come up pretending to be healthy.
+  loadDbCredentials()
+    .then((secret) => {
+      applySecret(secret);
+      app.listen(PORT, () => {
+        // eslint-disable-next-line no-console
+        console.log(`capacity-api listening on :${PORT} (metrics at /metrics, pid ${process.pid}, in-flight cap ${MAX_INFLIGHT})`);
+      });
+    })
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('boot failed: could not resolve DB credentials —', err.message);
+      process.exit(1);
+    });
 }

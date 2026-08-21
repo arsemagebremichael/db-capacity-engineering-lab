@@ -92,6 +92,9 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # C6 alert rules. prometheus.yml's rule_files points here; without this
+      # mount Prometheus starts with no rules and every alert silently never fires.
+      - ./monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
     depends_on:
       - capacity-api
     networks:

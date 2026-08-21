@@ -20,3 +20,37 @@ Thumbs.db
 # Logs / test output
 *.log
 load-tests/results/
+
+# Terraform / LocalStack — state holds the DB password in cleartext.
+# Treat the state bucket as a credential store; never commit state.
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.tflocal/
+terraform.tfvars
+*.auto.tfvars
+!*.tfvars.example
+
+# Aiven TLS material — download from the service page, never commit
+secrets/*.pem
+secrets/*.crt
+*.pem
+
+# A2 evidence must track even though *.log is ignored above
+!evidence/
+!evidence/**
+!evidence/**/*.log
+!evidence/**/*.txt
+!evidence/**/*.json
+# Loom / screencaps stay out of git (submit as links)
+evidence/**/*.mp4
+
+# Generated dumps
+*.dump.sql

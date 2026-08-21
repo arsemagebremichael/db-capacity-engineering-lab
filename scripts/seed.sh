@@ -128,8 +128,16 @@ docker exec -e MYSQL_HOST=127.0.0.1 \
             -e MYSQL_DATABASE=capacity_lab \
             -e ROW_COUNT="${ROW_COUNT}" \
             -i "${SRC_NAME}" bash < "${ROOT}/data-seed/seed.sh"
-docker exec -i "${SRC_NAME}" mysql -uroot -plabpassword capacity_lab \
-  < "${ROOT}/data-seed/01-fixes.sql"
+# Optional post-seed schema fixes. This repo's A1 work put the OPS-2201 index
+# inside data-seed/seed.sh itself (see LAB_JOURNAL.md "Step A — index"), so the
+# separate file does not exist here. Apply it only if a repo carries one.
+if [[ -f "${ROOT}/data-seed/01-fixes.sql" ]]; then
+  echo ">> applying data-seed/01-fixes.sql"
+  docker exec -i "${SRC_NAME}" mysql -uroot -plabpassword capacity_lab \
+    < "${ROOT}/data-seed/01-fixes.sql"
+else
+  echo ">> no data-seed/01-fixes.sql — schema fixes are already in seed.sh"
+fi
 
 echo ">> mysqldump throwaway → /tmp/capacity_lab.dump.sql"
 docker exec "${SRC_NAME}" mysqldump -uroot -plabpassword \

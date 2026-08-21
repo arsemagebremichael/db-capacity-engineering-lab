@@ -1,0 +1,38 @@
+# =============================================================================
+# Individual rehost pipeline.
+#
+# All the logic lives in the group platform's reusable workflow — this repo
+# contributes only its own paths. That is the point of the golden pipeline:
+# the gates are defined once, reviewed once, and every service inherits them,
+# so a hardening fix reaches every repo through one PR instead of four.
+#
+# Pinned to a commit SHA of the group repo, never a branch: a branch ref would
+# let someone else's merge silently change the gates this repo runs under.
+# Bumping it is a reviewed PR here, which is the same discipline the workflow
+# applies to its own actions.
+#
+# Group platform: https://github.com/akezasaloi/regional-health-platform
+# =============================================================================
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: akezasaloi/regional-health-platform/.github/workflows/ci.yml@d56f94d742cb4238a19a707f416a945423b74ae2
+    with:
+      app_dir: api
+      terraform_dir: terraform
+    secrets:
+      LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+      AIVEN_HOST: ${{ secrets.AIVEN_HOST }}
+      AIVEN_PORT: ${{ secrets.AIVEN_PORT }}
+      AIVEN_USER: ${{ secrets.AIVEN_USER }}
+      AIVEN_PASSWORD: ${{ secrets.AIVEN_PASSWORD }}
+      AIVEN_DB: ${{ secrets.AIVEN_DB }}

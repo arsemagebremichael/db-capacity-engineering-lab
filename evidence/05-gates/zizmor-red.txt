@@ -1,0 +1,10 @@
+error[unpinned-uses]: unpinned action reference
+  --> .github/workflows/ci.yml:28:11
+   |
+28 |     uses: akezasaloi/regional-health-platform/.github/workflows/ci.yml@main  # DELIBERATELY UNPINNED — C5 gate demo, reverted in the...
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ action is not pinned to a hash (required by blanket policy)
+   |
+   = note: audit confidence → High
+   = help: audit documentation → https://docs.zizmor.sh/audits/#unpinned-uses
+
+1 finding: 0 informational, 0 low, 0 medium, 1 high

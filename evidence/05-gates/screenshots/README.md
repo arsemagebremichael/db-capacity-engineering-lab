@@ -36,11 +36,4 @@ revert cleared it. A secret persists in history, so it needed a rewrite. Same
 | File | Run | Result | What it proves |
 |---|---|---|---|
 | `zizmor-1-red-run15-unpinned-uses.png` | #15 | ❌ red | The reusable-workflow ref moved from a 40-char SHA to `@main`. `unpinned-uses` caught it; gitleaks and trivy-config green beside it. A moving ref means someone else's merge silently changes the gates this repo runs under — the tj-actions/changed-files failure mode. |
-
-## Not captured
-
-The zizmor green run after re-pinning. The fix commit is linked from
-`../README.md`; the run is in this repo's Actions history.
-
-`duplicates/` holds two extra captures of run #7, kept only because they show
-the same finding at a different scroll position. Safe to delete.
+| `zizmor-2-green-run17-repinned.png` | #17 | ✅ green | Re-pinned to a 40-char SHA. All five jobs run through to `deploy-and-verify`. |

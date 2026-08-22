@@ -1,0 +1,62 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.74.0"
+  },
+  "ReportID": "01a026c2-1259-7230-9b62-6f393d6b1466",
+  "CreatedAt": "2026-08-21T23:57:28.02514493Z",
+  "ArtifactID": "sha256:12d6339318db47b9a7a4ddd1df735a76137092d2f2539b97a60c3a14a44cc272",
+  "ArtifactName": ".",
+  "ArtifactType": "repository",
+  "Metadata": {
+    "RepoURL": "https://github.com/arsemagebremichael/db-capacity-engineering-lab.git",
+    "Branch": "main",
+    "Commit": "3bd124839c064aaf1638a03dfecff11066d24c51",
+    "CommitMsg": "Merge pull request #3 from arsemagebremichael/fix/gitleaks-rules\n\nfix(gitleaks): load the default ruleset",
+    "Author": "Arsema A. Gebremichael \u003carsemaagebremichael@gmail.com\u003e",
+    "Committer": "GitHub \u003cnoreply@github.com\u003e"
+  },
+  "Results": [
+    {
+      "Target": "api/Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 20,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "git::https:/github.com/akezasaloi/regional-health-platform.git/terraform/modules/data?ref=d56f94d742cb4238a19a707f416a945423b74ae2/terraform/.terraform/modules/data/terraform/modules/data/main.tf",
+      "Class": "config",
+      "Type": "terraform"
+    },
+    {
+      "Target": "terraform",
+      "Class": "config",
+      "Type": "terraform",
+      "MisconfSummary": {
+        "Successes": 32,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "terraform/.terraform/modules/data/api/Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 20,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "terraform/.terraform/modules/service/api/Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 20,
+        "Failures": 0
+      }
+    }
+  ]
+}

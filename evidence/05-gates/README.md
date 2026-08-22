@@ -11,14 +11,29 @@ pull request.
 
 ## The three red PRs
 
-| Gate | Insecure change | Red PR | Fix commit |
-|---|---|---|---|
-| gitleaks | committed `MYSQL_ROOT_PASSWORD=Sup3rSecret!` in a `.env` | _PR link_ | _sha_ |
-| trivy config | security-group ingress widened to `0.0.0.0/0` | _PR link_ | _sha_ |
-| zizmor | one `uses:` moved from a 40-char SHA to `@v4` | _PR link_ | _sha_ |
+| Gate | Insecure change | Rule that fired | Red PR | Red run | Fix |
+|---|---|---|---|---|---|
+| gitleaks | fabricated AWS key committed in `.env.demo` | `aws-access-token` | [#2](https://github.com/arsemagebremichael/db-capacity-engineering-lab/pull/2) | [run 7](https://github.com/arsemagebremichael/db-capacity-engineering-lab/actions/runs/32538776713) | [`5295bc9`](https://github.com/arsemagebremichael/db-capacity-engineering-lab/commit/5295bc9) — history rewrite |
+| trivy config | debug security group, SSH ingress `0.0.0.0/0` | `AVD-AWS-0107` (HIGH) | [#4](https://github.com/arsemagebremichael/db-capacity-engineering-lab/pull/4) | [run 11](https://github.com/arsemagebremichael/db-capacity-engineering-lab/actions/runs/32539547612) | [`f6d0c5c`](https://github.com/arsemagebremichael/db-capacity-engineering-lab/commit/f6d0c5c) |
+| zizmor | reusable-workflow ref moved from a 40-char SHA to `@main` | `unpinned-uses` (HIGH) | [#5](https://github.com/arsemagebremichael/db-capacity-engineering-lab/pull/5) | [run 15](https://github.com/arsemagebremichael/db-capacity-engineering-lab/actions/runs/32540256737) | [`599d3a0`](https://github.com/arsemagebremichael/db-capacity-engineering-lab/commit/599d3a0) |
 
-Scanner output for each is committed alongside this file: `trivy-image.json`,
-`trivy-config.json`, `zizmor.txt`.
+Scanner output is committed alongside this file — the failing state
+(`gitleaks-red.json`, `trivy-config-red.json`, `zizmor-red.txt`) and the clean
+state after the fix (`trivy-config.json`, `trivy-image.json`, `zizmor.txt`).
+Screenshots of every run, with an index, are in [`screenshots/`](screenshots/).
+
+Two of these fixes needed more than the obvious revert:
+
+- **gitleaks** — `git rm .env.demo` was *not* enough. CI scans full history
+  (`fetch-depth: 0`), so the fix commit still failed on the secret in its
+  parent. Only rewriting the branch cleared it. For a real credential the
+  remediation is rewrite **plus rotation**: the value was exposed the moment it
+  was pushed.
+- **trivy** — the first fix used `HEAD~1`, a relative ref that by then pointed
+  at the commit *introducing* the rule, so it restored the vulnerability. The
+  gate caught the same finding a second time
+  ([run 14](https://github.com/arsemagebremichael/db-capacity-engineering-lab/actions/runs/32540174449)). A gate catching an accident is
+  better evidence than one catching a staged demo.
 
 ## What each gate does **not** catch
 

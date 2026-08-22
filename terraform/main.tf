@@ -42,17 +42,3 @@ module "service" {
   db_endpoint = module.data.db_endpoint
   db_port     = module.data.db_port
 }
-
-# DELIBERATELY INSECURE — C5 gate demo. Reverted in the fix commit.
-# "Temporary" debug access, the way it actually happens in real repos.
-resource "aws_security_group" "debug" {
-  name        = "capacity-api-debug"
-  description = "Debug SSH access"
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}

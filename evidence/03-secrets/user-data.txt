@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euxo pipefail
+export AWS_ENDPOINT_URL="http://localhost.localstack.cloud:4566"
+export AWS_DEFAULT_REGION="us-east-1"
+export DB_SECRET_ARN="arn:aws:secretsmanager:us-east-1:000000000000:secret:regional-health/db-aYdrFA"
+export DB_HOST="mysql-10a6869d-arsemaagebremichael-11a9.c.aivencloud.com"
+export DB_PORT="11691"
+docker run -d --restart=unless-stopped --memory=512m \
+  -e AWS_ENDPOINT_URL -e AWS_DEFAULT_REGION \
+  -e DB_SECRET_ARN -e DB_HOST -e DB_PORT \
+  -p 3000:3000 \
+  --name capacity-api \
+  ami-03cf127a

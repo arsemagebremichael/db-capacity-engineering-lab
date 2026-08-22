@@ -1,0 +1,10 @@
+AWS_ACCESS_KEY_ID=test
+AWS_DEFAULT_REGION=us-east-1
+AWS_ENDPOINT_URL=http://127.0.0.1:4566
+AWS_SECRET_ACCESS_KEY=test
+DB_SECRET_ARN=arn:aws:secretsmanager:us-east-1:000000000000:secret:regional-health/db-aYdrFA
+HOME=/home/node
+HOSTNAME=codespaces-8a71ad
+NODE_VERSION=22.23.2
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+YARN_VERSION=1.22.22

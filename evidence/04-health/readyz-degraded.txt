@@ -1,0 +1,17 @@
+# C4 — readiness flips when the secret behind it breaks
+# 2026-08-21T23:23:10Z
+
+## 1. healthy baseline
+healthz: 200
+readyz : 200
+{"status":"ready","checks":{"secret":"ok","pool":"ok","admission":"ok","db":"ok"}}
+
+## 2. secret rotated to a wrong password, app restarted
+healthz: 200   <- still alive
+readyz : 503   <- must be 503
+{"status":"not-ready","checks":{"secret":"ok","pool":"ok","admission":"ok","db":"ER_ACCESS_DENIED_ERROR"}}
+
+## 3. correct secret restored, app restarted
+healthz: 200
+readyz : 200   <- back to 200
+{"status":"ready","checks":{"secret":"ok","pool":"ok","admission":"ok","db":"ok"}}

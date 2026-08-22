@@ -1,0 +1,2 @@
+boot: db credentials from arn:aws:secretsmanager:us-east-1:000000000000:secret:regional-health/db-aYdrFA version terraform-k32GFWjhDg35hME29GeqGCwrCw
+capacity-api listening on :3000 (metrics at /metrics, pid 1, in-flight cap 32)
